@@ -30,9 +30,11 @@ namespace {
     Thread     g_worker   = nullptr;
     bool       g_running  = false;
     bool       g_available = false;
+    AudioBackend g_backend = AudioBackend::Csnd;
 
     CTRPluginFramework::Mutex g_lastMutex;
     std::string               g_lastText;
+    SynthStats                g_stats;
 
     /// Collects PCM from eSpeak and hands it to the audio backend.
     ///
@@ -78,33 +80,46 @@ namespace {
             if (g_synth == nullptr || g_audio == nullptr)
                 continue;
 
+            const u64  startMs = osGetTime();
+            SynthStats stats;
+            stats.sampleRate = g_synth->SampleRate();
+
             BufferSink sink;
-            if (!g_synth->Synthesize(item.text, sink))
-                continue;           // cancelled, or synthesis failed
+            stats.ok = g_synth->Synthesize(item.text, sink);
 
-            if (sink.Empty())
-                continue;
+            if (stats.ok && !sink.Empty())
+            {
+                stats.samples = static_cast<u32>(sink.Samples().size());
+                stats.played  = g_audio->Play(sink.Samples().data(),
+                                              stats.samples,
+                                              g_synth->SampleRate(),
+                                              0.0f /* centred */);
+            }
 
-            g_audio->Play(sink.Samples().data(),
-                          static_cast<u32>(sink.Samples().size()),
-                          g_synth->SampleRate(),
-                          0.0f /* centred */);
+            stats.elapsedMs = static_cast<u32>(osGetTime() - startMs);
 
             {
                 CTRPluginFramework::Lock lock(g_lastMutex);
-                g_lastText = item.text;
+                g_stats = stats;
+                if (stats.ok)
+                    g_lastText = item.text;
             }
+
+            if (!stats.ok || sink.Empty())
+                continue;
         }
     }
 }
 
-bool Init(void)
+bool Init(AudioBackend backend)
 {
     if (g_available)
         return true;
 
-    g_synth = CreateEspeakSynth();
-    g_audio = CreateCwavAudio();
+    g_backend = backend;
+    g_synth   = CreateEspeakSynth();
+    g_audio   = (backend == AudioBackend::WavDump) ? CreateWavDumpAudio()
+                                                   : CreateCwavAudio();
 
     if (g_synth == nullptr || g_audio == nullptr)
     {
@@ -204,6 +219,22 @@ bool IsAvailable(void)
     return g_available;
 }
 
+bool SetAudioBackend(AudioBackend backend)
+{
+    if (g_available && backend == g_backend)
+        return true;
+
+    // Restarting is simpler and safer than swapping the pointer underneath a
+    // worker that may be mid-utterance.
+    Shutdown();
+    return Init(backend);
+}
+
+AudioBackend CurrentAudioBackend(void)
+{
+    return g_backend;
+}
+
 void SetRate(int wordsPerMinute)
 {
     if (g_synth != nullptr)
@@ -213,6 +244,12 @@ void SetRate(int wordsPerMinute)
 void SetVolume(float /*volume*/)
 {
     // TODO(phase-1): forward to the Sound object once playback is wired up.
+}
+
+SynthStats LastSynthStats(void)
+{
+    CTRPluginFramework::Lock lock(g_lastMutex);
+    return g_stats;
 }
 
 }} // namespace xyoras::speech

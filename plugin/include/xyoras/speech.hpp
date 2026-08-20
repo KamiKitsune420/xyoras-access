@@ -63,8 +63,18 @@ namespace xyoras { namespace speech {
         virtual ~IAudioOut() {}
     };
 
+    /// Which audio backend the speech worker should use.
+    enum class AudioBackend
+    {
+        Csnd,   ///< Normal playback over the running game. Real hardware.
+        WavDump ///< Write .wav files to the SD card instead of playing them.
+                ///< For emulators, where CSND is stubbed and nothing is heard,
+                ///< and for diagnosing silence on hardware.
+    };
+
     ISynth    *CreateEspeakSynth(void);
     IAudioOut *CreateCwavAudio(void);
+    IAudioOut *CreateWavDumpAudio(void);
 
     // -------------------------------------------------------------------------
     // The public surface — this is what feature code uses
@@ -72,8 +82,13 @@ namespace xyoras { namespace speech {
 
     /// Starts the synthesis worker thread. Returns false if speech is
     /// unavailable; the plugin stays alive either way so the menu can report it.
-    bool Init(void);
+    bool Init(AudioBackend backend = AudioBackend::Csnd);
     void Shutdown(void);
+
+    /// Tears down and restarts the worker on the other backend. Safe to call
+    /// while running; anything queued is dropped.
+    bool SetAudioBackend(AudioBackend backend);
+    AudioBackend CurrentAudioBackend(void);
 
     /// Enqueues an utterance. Returns immediately — never blocks a game thread.
     void Say(Priority priority, const std::string &text);
@@ -88,6 +103,21 @@ namespace xyoras { namespace speech {
 
     void SetRate(int wordsPerMinute);
     void SetVolume(float volume);
+
+    /// What the worker recorded about the most recent utterance. Used by the
+    /// startup self-test to prove the pipeline ran, and to time it.
+    struct SynthStats
+    {
+        bool ok;            ///< Synthesis completed rather than failing or being cancelled.
+        u32  samples;       ///< PCM samples produced.
+        u32  elapsedMs;     ///< Wall time from dequeue to audio submitted.
+        int  sampleRate;    ///< Rate eSpeak reported at init.
+        bool played;        ///< The audio backend accepted the buffer.
+
+        SynthStats() : ok(false), samples(0), elapsedMs(0), sampleRate(0), played(false) {}
+    };
+
+    SynthStats LastSynthStats(void);
 
 }} // namespace xyoras::speech
 

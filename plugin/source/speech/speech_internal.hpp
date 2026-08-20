@@ -9,25 +9,11 @@
 #define XYORAS_SPEECH_INTERNAL_HPP
 
 #include "xyoras/speech.hpp"
+#include "xyoras/sync.hpp"
 
-#include <3ds.h>
 #include <vector>
 
 namespace xyoras { namespace speech {
-
-    /// Thin wrapper over libctru's LightEvent so the worker can sleep until
-    /// there is work instead of spinning. A timed wait means a shutdown
-    /// request is still noticed promptly when the queue stays empty.
-    class WakeEvent
-    {
-    public:
-        WakeEvent(void)              { LightEvent_Init(&event_, RESET_ONESHOT); }
-        void Signal(void)            { LightEvent_Signal(&event_); }
-        void Wait(u64 timeoutNs)     { LightEvent_WaitTimeout(&event_, timeoutNs); }
-
-    private:
-        LightEvent event_;
-    };
 
     struct Item
     {
@@ -61,7 +47,7 @@ namespace xyoras { namespace speech {
         void WaitForWork(u64 timeoutNs) { event_.Wait(timeoutNs); }
 
     private:
-        CTRPluginFramework::Mutex mutex_;
+        Mutex                     mutex_;
         WakeEvent                 event_;
         std::vector<Item>         items_;
         bool                      cancelCurrent_;

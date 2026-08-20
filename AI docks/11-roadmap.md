@@ -14,7 +14,8 @@ Status legend: `TODO` · `WIP` · `DONE` · `BLOCKED`
 | 0.6 | Bootstrap installs libctrpf, 3gxtool, libcwav, libncsnd | DONE |
 | 0.7 | eSpeak NG cross-compiles to `libespeak-ng.a` for ARM11 | DONE |
 | 0.8 | `.3gx` builds, links, and packages | DONE |
-| 0.9 | Plugin loads on real hardware | TODO |
+| 0.9 | Host test harness (`scripts/host-test.sh`) | DONE |
+| 0.10 | Plugin loads on real hardware | TODO |
 
 **Exit criterion:** a plugin that loads in Pokémon X on a real 3DS and shows a
 CTRPF menu entry.

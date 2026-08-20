@@ -10,22 +10,29 @@
 #ifndef XYORAS_COMMON_HPP
 #define XYORAS_COMMON_HPP
 
-#include <CTRPluginFramework.hpp>
+// Parts of this codebase are compiled twice: for the plugin, and natively for
+// the host tests. Anything that only exists on the 3DS has to be guarded, or
+// the host build cannot see the logic it is meant to be testing.
+#ifdef __3DS__
+  #include <CTRPluginFramework.hpp>
+#endif
+
+#include <cstdint>
 #include <string>
 
 namespace xyoras
 {
-    // CTRPF's types.h puts these in the global namespace, not in
-    // CTRPluginFramework. Re-export them under xyoras:: so our own headers do
-    // not have to reach into the global namespace everywhere.
-    typedef ::u8  u8;
-    typedef ::u16 u16;
-    typedef ::u32 u32;
-    typedef ::u64 u64;
-    typedef ::s8  s8;
-    typedef ::s16 s16;
-    typedef ::s32 s32;
-    typedef ::s64 s64;
+    // Fixed-width types, spelled the way the 3DS homebrew world spells them.
+    // Defined from <cstdint> rather than taken from CTRPF's types.h so that
+    // they mean the same thing in a host build.
+    typedef std::uint8_t  u8;
+    typedef std::uint16_t u16;
+    typedef std::uint32_t u32;
+    typedef std::uint64_t u64;
+    typedef std::int8_t   s8;
+    typedef std::int16_t  s16;
+    typedef std::int32_t  s32;
+    typedef std::int64_t  s64;
 
     /// Version of this plugin, reported in the settings menu.
     constexpr const char *kVersion = "0.1.0";
@@ -33,8 +40,10 @@ namespace xyoras
     /// Root of our data on the SD card. Voice data, sounds, config, log.
     constexpr const char *kSdRoot = "/xyoras-access";
 
-    /// Written only when Config::debugLog is on — SD writes are slow.
+    /// Written only when debug logging is on — SD writes are slow enough to be
+    /// felt, and this can be reached from paths that run every frame.
     void Log(const std::string &message);
+    void SetLogEnabled(bool enabled);
 }
 
 #endif

@@ -34,6 +34,25 @@ Rule: a new `UI` utterance replaces an unspoken pending `UI` utterance rather
 than queueing behind it, so fast cursor movement does not cause a speech
 backlog. `DIALOGUE` never drops — losing a story line loses the game's plot.
 
+### Where "cancels lower" and "never dropped" collide
+
+`CRITICAL` cancels lower priorities, and `DIALOGUE` is lower than `CRITICAL`.
+Taken literally those two rules mean a fainting message deletes the story line
+queued behind it. **Dialogue wins.**
+
+- `CRITICAL` clears pending `UI` and `AMBIENT`, and interrupts whatever is
+  being spoken — so it is still heard immediately.
+- `CRITICAL` does **not** clear pending `DIALOGUE`. The priority sort already
+  places it ahead, so the critical message is spoken first and the story
+  resumes after it. Nothing is lost by keeping the line.
+- `INTERRUPT` **does** clear everything, dialogue included. The distinction is
+  consent: the player asked for that, and message history can recover what was
+  dropped. `CRITICAL` fires automatically, so it must not make that trade on
+  the player's behalf.
+
+This was found by the host tests, not by reading the spec — see
+`12-research-log.md`.
+
 ## Feature set
 
 ### Overworld

@@ -2,11 +2,17 @@
 
 ## The awkward truth
 
-The plugin cannot be tested in an emulator. Azahar (and Citra before it) has no
-3GX plugin support and no scripting API, so **every test of the actual plugin
-happens on real hardware**. This shapes the whole QA approach: keep as much
-logic as possible testable off-target, and make on-target testing cheap to
-repeat.
+The plugin cannot be tested in an emulator, and this was confirmed by trying
+(see `12-research-log.md`). Azahar *does* load a `.3gx` and parse its metadata,
+which looks promising — but CTRPluginFramework then calls `svcCustomBackdoor`,
+Luma3DS's custom SVC 0x80, which Azahar does not implement, and the plugin
+stops there. Even past that point, Azahar's CSND is entirely stubbed, so
+nothing would be audible.
+
+Both are missing emulation rather than bugs we can work around, so **every test
+of the actual plugin happens on real hardware**. This shapes the whole QA
+approach: keep as much logic as possible testable off-target, and make
+on-target testing cheap to repeat.
 
 ## Three test layers
 
@@ -24,6 +30,31 @@ Pure logic with no 3DS dependency compiles and runs natively:
 
 These are the tests that catch most regressions, so push logic down into
 testable pure functions wherever possible.
+
+```bash
+scripts/host-test.sh
+```
+
+Finds a host compiler by itself — MSVC via `vswhere` (Visual Studio does not
+need to be on `PATH`), otherwise `g++` or `clang++`. No host C compiler is
+needed for the plugin build itself; this is the only thing that wants one.
+
+The tests compile the **shipped** sources, not copies. `plugin/include/xyoras/sync.hpp`
+is what makes that possible: it maps `Mutex`, `Lock`, and `WakeEvent` onto
+CTRPF's primitives on the 3DS and onto `std::mutex` and friends on the host, so
+`queue.cpp` builds unchanged either way. Test a copy of the code and you have
+tested nothing.
+
+Current coverage:
+
+| Suite | Covers |
+| --- | --- |
+| `test_queue` | Priority ordering, interruption, `UI` coalescing, `AMBIENT` yielding, overflow behaviour, and that `DIALOGUE` is never dropped |
+| `test_wav` | RIFF/WAVE header fields, sizes, struct layout, and the on-disk byte image |
+
+Adding a suite: drop `test_<name>.cpp` in `tools/host-test/`, add `<name>` to
+`TESTS` in `scripts/host-test.sh`, and set `SRCS_test_<name>` to any plugin
+sources it needs compiled alongside it.
 
 ### 2. Emulator research (fast, not a test)
 

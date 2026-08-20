@@ -11,6 +11,11 @@
 
 #include <string>
 
+namespace xyoras { namespace diag {
+    bool IsSelfTestRequested(void);
+    void RunSelfTest(void);
+}}
+
 namespace CTRPluginFramework
 {
     using namespace xyoras;
@@ -64,6 +69,9 @@ namespace CTRPluginFramework
             g_statusText += game::IsVersionSupported() ? "yes" : "no";
             g_statusText += "\nSpeech: ";
             g_statusText += speech::IsAvailable() ? "ready" : "unavailable";
+            g_statusText += "\nAudio output: ";
+            g_statusText += (speech::CurrentAudioBackend() == speech::AudioBackend::WavDump)
+                          ? "WAV files on SD" : "CSND";
 
             menu.Append(new MenuEntry("Status", nullptr, ShowStatus,
                 "Shows the detected game, update version, and whether speech started."));
@@ -79,6 +87,25 @@ namespace CTRPluginFramework
         void StopSpeech(MenuEntry *)   { speech::StopAll();    }
         void RepeatSpeech(MenuEntry *) { speech::RepeatLast(); }
 
+        /// Emulators stub CSND out, so nothing is ever heard there. Switching
+        /// to the WAV backend makes the emulator useful anyway: everything up
+        /// to playback still runs, and the result lands on the SD card where
+        /// it can be listened to on a computer.
+        void ToggleAudioBackend(MenuEntry *)
+        {
+            const bool toWav =
+                speech::CurrentAudioBackend() == speech::AudioBackend::Csnd;
+
+            speech::SetAudioBackend(toWav ? speech::AudioBackend::WavDump
+                                          : speech::AudioBackend::Csnd);
+
+            MessageBox("Audio output",
+                       toWav ? "Now writing speech to\n"
+                               "sdmc:/xyoras-access/speech/\n\n"
+                               "Nothing will be heard. Play the files on a computer."
+                             : "Now playing speech through CSND.")();
+        }
+
         void BuildSpeechEntries(PluginMenu &menu)
         {
             menu.Append(new MenuEntry("Test speech", nullptr, TestSpeech,
@@ -89,6 +116,11 @@ namespace CTRPluginFramework
 
             menu.Append(new MenuEntry("Repeat last", nullptr, RepeatSpeech,
                 "Repeats the last thing spoken."));
+
+            menu.Append(new MenuEntry("Toggle audio output", nullptr, ToggleAudioBackend,
+                "Switch between playing speech and writing it to the SD card as "
+                ".wav files. Use the file output on emulators, where CSND is not "
+                "emulated and nothing can be heard."));
         }
     }
 
@@ -124,13 +156,22 @@ namespace CTRPluginFramework
         // Keeps menu updates in step with the game's frames.
         menu->SynchronizeWithFrame(true);
 
+        // A marker file on the SD card switches speech to .wav output and asks
+        // for a written report. This is the only way to see what happened on an
+        // emulator, where CSND is stubbed and nothing can be heard.
+        const bool selfTest = diag::IsSelfTestRequested();
+
         // Speech comes up before the menu is populated so the status entry can
         // report honestly whether it started.
-        speech::Init();
+        speech::Init(selfTest ? speech::AudioBackend::WavDump
+                              : speech::AudioBackend::Csnd);
 
         InitMenu(*menu);
 
         AnnounceStartup();
+
+        if (selfTest)
+            diag::RunSelfTest();
 
         menu->Run();
 

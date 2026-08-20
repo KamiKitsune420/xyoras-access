@@ -12,8 +12,6 @@
 
 namespace xyoras { namespace speech {
 
-using CTRPluginFramework::Lock;
-
 namespace {
     /// Beyond this the player is not listening any more, they are waiting.
     /// Dropping the oldest Ambient/Ui item is better than a growing backlog.
@@ -38,12 +36,25 @@ void Queue::Push(Priority priority, const std::string &text)
         items_.clear();
         cancelCurrent_ = true;
     }
-    // Critical outranks everything still waiting that is lower than it.
+    // Critical must be heard now, so it clears the chatter -- but deliberately
+    // NOT Dialogue.
+    //
+    // "Critical cancels lower priorities" and "Dialogue is never dropped" are
+    // both design rules, and Dialogue is the lower of the two, so they collide
+    // here. Dialogue wins: a fainting message must not silently delete the
+    // story line queued behind it. The player did not ask for that trade, and
+    // a lost line is unrecoverable except through message history.
+    //
+    // Nothing is lost by keeping it. The priority sort already places this
+    // utterance ahead of pending Dialogue, and cancelCurrent_ stops whatever
+    // is being spoken right now -- so Critical is still heard immediately, and
+    // the story simply resumes afterwards.
     else if (priority == Priority::Critical)
     {
         items_.erase(
             std::remove_if(items_.begin(), items_.end(),
-                [](const Item &i) { return IsHigherPriority(Priority::Critical, i.priority); }),
+                [](const Item &i) { return i.priority == Priority::Ui
+                                        || i.priority == Priority::Ambient; }),
             items_.end());
         cancelCurrent_ = true;
     }

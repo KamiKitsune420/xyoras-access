@@ -42,7 +42,8 @@ xyoras-access/
 │   ├── package.sh            Produce dist/luma.zip
 │   └── clean.sh              Remove build output
 │
-├── tools/                    Host-side helpers (Python/C#)
+├── tools/                    Host-side helpers
+│   ├── host-test/            Tests that compile plugin logic natively
 │   └── gen_name_tables.py    Turn name data into compiled C++ tables
 │
 ├── third_party/              Fetched, never committed (see .gitignore)
@@ -65,6 +66,7 @@ xyoras-access/
 | A design decision or a finding | the matching `AI docks/` file |
 | A source URL or dead end | `AI docks/12-research-log.md` |
 | Instructions for a player | `docs/` |
+| A test that can run without a 3DS | `tools/host-test/` |
 | A build or packaging step | `scripts/` |
 | A tool that runs on the PC, not the 3DS | `tools/` |
 

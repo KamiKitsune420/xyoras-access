@@ -407,3 +407,110 @@ This also means **no host C compiler is needed** anywhere in the build.
 
 **Consequence:** Phase 0 tasks 0.5–0.7 are done. 0.8 (loads on hardware)
 still needs a console.
+
+---
+
+## 2026-08-20 — Can the plugin be tested in an emulator? No.
+
+**Question:** hardware was unavailable (no charger). Can Azahar substitute?
+
+**Method:** built the plugin with a WAV-file audio backend and a marker-file
+self-test so nothing needed to be heard or navigated, deployed to Azahar's
+emulated SD at `sdmc/luma/plugins/<TitleID>/`, enabled the plugin loader, and
+ran Pokémon X while reading `azahar_log.txt`.
+
+**Finding: no, and it is not fixable from our side.** Three layers, two of
+which are unimplemented emulation:
+
+| Layer | Azahar | Evidence |
+| --- | --- | --- |
+| Loads the `.3gx`, parses `.plgInfo` | works | `PLGLDR: Trying to load plugin - Title: XYORAS Access - Author: XYORAS Access contributors` |
+| Runs CTRPluginFramework | **fails** | `Kernel.SVC: unimplemented SVC function 80 CustomBackdoor(..)` |
+| Plays audio via CSND | **fails** | every `CSND_SND::*` call logs `(STUBBED)` |
+
+CTRPF got as far as initialising its own sound engine (`CSND_SND::Initialize`,
+`AcquireSoundChannels` at t=2.33 — distinct from the game's own DSP init at
+t=3.09), then called **`svcCustomBackdoor`, Luma3DS's custom SVC 0x80**. Azahar
+does not implement it. It is called exactly once and the plugin does nothing
+afterwards: zero filesystem access to `/xyoras-access`, so eSpeak never
+initialised and our `main()` never reached our own code. The game itself booted
+and ran normally for 103 seconds.
+
+This is the deeper reason emulator testing fails. CSND being stubbed would
+already make speech inaudible, but the plugin does not even get that far —
+CTRPF is built against Luma's custom SVCs and an emulator that lacks them
+cannot host it.
+
+**Consequence:**
+
+- `10-testing-and-qa.md` was right that plugin testing needs hardware, but for
+  the wrong reason. Corrected there.
+- Azahar remains useful for **running the game** — which is all Phase 2 offset
+  research needs.
+- Two things built for this attempt are keepers, because both are useful on
+  hardware:
+  - **WAV audio backend** (`speech/audio_wav.cpp`) — writes utterances to
+    `/xyoras-access/speech/*.wav` instead of playing them. On hardware this
+    tells you instantly whether silence is a synthesis problem or a playback
+    problem.
+  - **Startup self-test** (`diagnostics.cpp`) — triggered by a marker file
+    `/xyoras-access/dump-audio`, writes `/xyoras-access/diagnostics.txt` with
+    the detected game, whether eSpeak started, sample rate, sample count,
+    synthesis time, and a realtime factor. That last number is exactly the
+    Phase 1 exit measurement, and a blind user can produce it by creating one
+    empty file and sending back one text file.
+
+**Also unresolved and now urgent:** eSpeak reads its voice data with plain
+`fopen`, and whether newlib's `sdmc:` device is mounted inside a game process
+is still unverified — the emulator never got far enough to answer it. CTRPF
+provides its own `File` API that uses the game's FS session, and community
+plugins use it exclusively, which is weak evidence that `fopen` may not work.
+If it does not, eSpeak needs its data supplied another way. **Verify this
+first when hardware is available** — the whole speech design rests on it.
+
+---
+
+## 2026-08-20 — Host tests found a real design contradiction
+
+**Question:** with the emulator ruled out, what can be tested without hardware?
+
+**Method:** built `scripts/host-test.sh`, which compiles the plugin's own logic
+natively and runs it. The key piece is `plugin/include/xyoras/sync.hpp`, which
+maps `Mutex`, `Lock`, and `WakeEvent` onto CTRPF's primitives on the 3DS and
+onto `std::mutex` on the host, so `queue.cpp` compiles unchanged for both. The
+tests exercise the shipped source, not a copy — testing a copy tests nothing.
+
+MSVC is located through `vswhere`, so Visual Studio does not need to be on
+`PATH`. Two quirks worth recording: `python3` is not on `PATH` on this machine
+(only `python`), and quoting a `vcvars64.bat` call plus a `cl` invocation
+through `cmd //c` from Git Bash cannot be made to work — the script writes a
+throwaway `.bat` instead.
+
+**Finding: the queue had a real bug, and it came straight from an ambiguity in
+the design doc.** Two rules in `02-accessibility-design.md` contradict:
+
+- `CRITICAL` — "cancels lower priorities"
+- `DIALOGUE` — "queued in order, never dropped"
+
+`DIALOGUE` is lower than `CRITICAL`, so the implementation did what the first
+rule said: a "your Pokémon fainted" message **silently deleted queued story
+dialogue**. On hardware this would have shown up as story lines occasionally
+vanishing during battles — intermittent, unreproducible, and very hard to
+attribute.
+
+Resolved in favour of dialogue. `CRITICAL` now clears only `UI` and `AMBIENT`
+and raises the cancel flag, so it is still heard immediately; the priority sort
+already places it ahead of pending dialogue, so nothing is lost by keeping the
+line. `INTERRUPT` still clears everything including dialogue, because the
+player explicitly asked for that and message history can recover it. The
+distinction is consent: automatic events do not get to discard the story,
+player-initiated ones do.
+
+**Consequence:** `02-accessibility-design.md` now states the precedence
+explicitly instead of leaving two rules to collide. Current coverage is 60
+checks across two suites, all passing.
+
+**Worth noting for its own sake:** this bug was invisible to code review — both
+rules read as obviously correct in isolation, and the implementation faithfully
+matched one of them. It took writing down an expectation as an executable
+assertion to notice they could not both hold.
