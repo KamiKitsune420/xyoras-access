@@ -1,0 +1,16 @@
+Author: XYORAS Access contributors
+
+Version:
+    Major: 0
+    Minor: 1
+    Revision: 0
+
+Title: XYORAS Access
+Summary: Accessibility for Pokemon Gen 6
+Description: Speaks dialogue, menus, battles, and the map aloud for blind and low-vision players. Pokemon X, Y, Omega Ruby, and Alpha Sapphire.
+Compatibility: Any
+
+# Heap reserved for the plugin. eSpeak NG's voice data and synthesis buffers
+# dominate this; see "AI docks/05-plugin-architecture.md" for the budget.
+# Measure real usage before lowering it.
+MemorySize: 12MiB

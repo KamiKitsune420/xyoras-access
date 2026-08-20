@@ -1,0 +1,41 @@
+# ---- Build output ----
+Build/
+build/
+build-*/
+out/
+dist/
+*.o
+*.d
+*.a
+*.elf
+*.map
+*.3gx
+*.zip
+
+# ---- Third-party working copies ----
+third_party/espeak-ng/
+third_party/libctrpf/
+third_party/libcwav/
+third_party/libncsnd/
+
+# ---- Generated speech / data ----
+data/espeak-ng-data/
+*.wav
+*.bcwav
+
+# ---- Local environment ----
+.env
+.env.local
+scripts/env.local.sh
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- Logs & scratch ----
+*.log
+scratch/
