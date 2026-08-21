@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Packages the plugin into an SD-card-ready archive.
 #
-#   scripts/package.sh
+#   scripts/package.sh                 a normal release package
+#   scripts/package.sh --first-boot    the same, plus diagnostic markers
 #
 # Output: dist/luma.zip
 #
@@ -10,10 +11,24 @@
 #   xyoras-access/sounds/                     non-speech cues
 #   xyoras-access/config.txt                  default settings
 #
+# --first-boot additionally writes the `self-test` and `trace-narration`
+# marker files. They are what the bring-up sequence in
+# "AI docks/10-testing-and-qa.md" asks for, and creating an extension-less
+# empty file by hand on Windows is more annoying than it should be. They are
+# NOT in a normal package: they cost a player SD writes and buy them nothing.
+#
 # The same .3gx goes in all four folders; the plugin works out which game it
 # is running in at startup.
 
 set -euo pipefail
+
+FIRST_BOOT=0
+for arg in "$@"; do
+    case "${arg}" in
+        --first-boot) FIRST_BOOT=1 ;;
+        *) printf 'unknown option: %s\n' "${arg}" >&2; exit 2 ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Re-exec inside devkitPro MSYS2 if needed; see msys-guard.sh for why.
@@ -56,6 +71,26 @@ for tid in "${TITLE_IDS[@]}"; do
 done
 
 mkdir -p "${STAGE}/xyoras-access/sounds"
+
+# Diagnostic markers. Removed unless asked for, so a package built after a
+# --first-boot one does not quietly keep them.
+rm -f "${STAGE}/xyoras-access/self-test" \
+      "${STAGE}/xyoras-access/trace-narration" \
+      "${STAGE}/xyoras-access/dump-audio"
+
+if [ "${FIRST_BOOT}" -eq 1 ]; then
+    # self-test       writes diagnostics.txt: what was detected, whether speech
+    #                 started, how long synthesis took.
+    # trace-narration writes narration.txt: every scan, what it read, what it
+    #                 chose to say.
+    #
+    # dump-audio is deliberately NOT written. It diverts speech to .wav files,
+    # and whether CSND plays over a running game is the one thing hardware has
+    # to answer. Add it by hand only if the first boot is silent.
+    : > "${STAGE}/xyoras-access/self-test"
+    : > "${STAGE}/xyoras-access/trace-narration"
+    log "including first-boot diagnostic markers"
+fi
 
 if [ ! -d "${STAGE}/xyoras-access/espeak-ng-data" ]; then
     printf '\033[1;33m!!!\033[0m no voice data staged — run scripts/build-espeak-3ds.sh, or the mod will be mute\n' >&2
@@ -136,3 +171,13 @@ log "packaged ${ARCHIVE} ($(du -h "${ARCHIVE}" | cut -f1))"
 echo
 echo "  Extract to the root of the SD card, merging with the existing luma folder."
 echo "  Then enable the plugin loader in Rosalina (L + Down + Select)."
+
+if [ "${FIRST_BOOT}" -eq 1 ]; then
+    echo
+    echo "  First-boot markers included. After booting, copy these back off the card:"
+    echo "    xyoras-access/checkpoints.txt   how far startup got"
+    echo "    xyoras-access/diagnostics.txt   what was detected, and speech timings"
+    echo "    xyoras-access/narration.txt     every scan, and what it read"
+    echo
+    echo "  The sequence to work through is in AI docks/10-testing-and-qa.md."
+fi

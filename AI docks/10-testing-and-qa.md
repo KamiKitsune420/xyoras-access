@@ -89,6 +89,80 @@ Everything else. Keep a checklist and run it before every release.
 Old 3DS is the performance-critical target — if synthesis latency is going to
 fail anywhere, it fails there.
 
+## First boot on hardware
+
+The release checklist below assumes the mod works. This section is for the
+first time it ever runs on a console, when it might not.
+
+Order matters here. Each step depends on the one before it, so the first thing
+that fails tells you where the problem is. Running them out of order turns one
+clear answer into several ambiguous ones.
+
+**Before powering on**, put these on the SD card:
+
+```
+SD:/luma/plugins/<TitleID>/XYORASAccess.3gx     (from dist/luma.zip)
+SD:/xyoras-access/                              (eSpeak voice data, from the zip)
+SD:/xyoras-access/self-test                     (empty file — asks for a report)
+SD:/xyoras-access/trace-narration               (empty file — logs what it reads)
+```
+
+Do **not** create `dump-audio` yet. It diverts speech to .wav files, and
+whether CSND actually plays over a running game is the single biggest thing
+hardware has to answer. Adding it would skip that question.
+
+### The sequence
+
+| # | Question | How you know | If it fails |
+| --- | --- | --- | --- |
+| 1 | Does the plugin load at all? | `SD:/xyoras-access/checkpoints.txt` exists | Plugin loader off in Rosalina, or wrong title-ID folder |
+| 2 | Does SD access work in a game process? | `checkpoints.txt` says `sdmc mounted` and `fopen WORKS` | This is what broke under emulation; see `platform.cpp` |
+| 3 | Does eSpeak start? | `checkpoints.txt` says `espeak: ready` | Voice data missing or in the wrong place. eSpeak **hangs** rather than failing without it |
+| 4 | **Does CSND play over the game?** | You hear the startup banner | Never tested anywhere. See below |
+| 5 | Is narration allowed to run? | `checkpoints.txt` says `narration started` | See "your cart may be updated" below |
+| 6 | Does the scan find panes? | `narration.txt` has `scan: N panes found` | N in the tens is right; 0 forever means the vtable address is wrong for this build |
+| 7 | Is the scan fast enough? | The `in NNN ms` on each scan line | The 551 ms / 31 ms figures are emulated and prove nothing about hardware |
+| 8 | Does it read the right text? | `narration.txt` `baseline:` block | Compare it against what is actually on screen |
+| 9 | Does the read-screen tap work? | Tap ZL (or L+R together) | `narration.txt` logs `read screen:` |
+
+**If the game hangs or the console freezes:** power off, take the SD card out,
+and read `checkpoints.txt`. The last line is where it stopped. That file is
+written through CTRPF's own file API before anything else can fail, and it
+exists precisely because a blind player cannot read an exception screen.
+
+### Step 4 is the real unknown
+
+Everything up to synthesis has been proven — under emulation, but proven, and
+the PCM was verified byte-for-byte against what CSND would have been handed.
+What has never run anywhere is the last hop: CSND actually mixing that buffer
+into a game that is already using the audio hardware.
+
+If the banner is silent but `checkpoints.txt` says `speech started`, synthesis
+worked and playback did not. Add `SD:/xyoras-access/dump-audio`, boot again,
+and listen to the .wav files in `SD:/xyoras-access/speech/` on a computer. If
+they sound correct, the problem is CSND alone and nothing upstream.
+
+### Your cart may be updated, and then narration will refuse to start
+
+`LayoutText` is verified for **XY version 0 only** — a base cartridge with no
+update installed. An update replaces `code.bin`, which moves every address the
+scan depends on.
+
+So if the console has ever been online with the game in it, narration will
+likely refuse to start and say so. **That is correct behaviour, not a bug**:
+scanning for a vtable address from a different build finds nothing at best and
+the wrong objects at worst.
+
+The CTRPF menu's Status entry shows the detected update version. If it is not
+0, that number is the first thing to write down — the vtable addresses have to
+be re-derived for that build before narration can run on it, and the method is
+in `04-gen6-reverse-engineering.md`.
+
+### What to bring back
+
+`checkpoints.txt`, `diagnostics.txt` and `narration.txt` together answer almost
+every question above. Copy all three off the card before changing anything.
+
 ## Release checklist
 
 **Startup**
