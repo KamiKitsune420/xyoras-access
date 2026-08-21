@@ -46,4 +46,43 @@ bool IsSdmcMounted(void)
     return g_sdmcMounted;
 }
 
+namespace {
+    /// svcControlMemory works in pages and rejects anything else.
+    inline u32 PageAlign(u32 size)
+    {
+        return (size + 0xFFF) & ~0xFFFu;
+    }
+}
+
+void *LinearAlloc(u32 size)
+{
+    if (size == 0)
+        return nullptr;
+
+    // libctru's linearAlloc draws from a heap that __appInit creates. A plugin
+    // is injected into a running game and never executes that, so linearAlloc
+    // returns null every time -- measured, see "AI docks/12-research-log.md".
+    //
+    // MEMOP_ALLOC_LINEAR asks the kernel directly and is what libctru's own
+    // heap setup uses underneath.
+    u32 addr = 0;
+    const Result res = svcControlMemory(&addr, 0, 0, PageAlign(size),
+                                        MEMOP_ALLOC_LINEAR, MEMPERM_READWRITE);
+
+    if (R_FAILED(res) || addr == 0)
+        return nullptr;
+
+    return reinterpret_cast<void *>(addr);
+}
+
+void LinearFree(void *ptr, u32 size)
+{
+    if (ptr == nullptr || size == 0)
+        return;
+
+    u32 tmp = 0;
+    svcControlMemory(&tmp, reinterpret_cast<u32>(ptr), 0, PageAlign(size),
+                     MEMOP_FREE, MEMPERM_DONTCARE);
+}
+
 }} // namespace xyoras::platform

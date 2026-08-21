@@ -195,6 +195,24 @@ Planned allocation (to be measured, see `11-roadmap.md`):
 Old 3DS has 128 MB total with far less free than New 3DS, so the Old-3DS
 budget is the binding constraint. Measure before assuming.
 
+## What libctru does NOT give a plugin
+
+A plugin is injected into an already-running game, so **none of libctru's
+application startup runs**. Anything that startup normally sets up is simply
+absent, and the APIs depending on it fail in confusing ways rather than
+reporting the real cause.
+
+Confirmed so far, both the hard way:
+
+| Missing | Symptom | Fix |
+| --- | --- | --- |
+| `sdmc:` devoptab | every `fopen` fails; eSpeak **hangs** | `fsInit()` + `archiveMountSdmc()` |
+| Linear heap | `linearAlloc` always returns null | `svcControlMemory(..., MEMOP_ALLOC_LINEAR, ...)` |
+
+Both live in `platform.cpp`. Expect more of the same — romfs and the socket
+service are likely candidates. **When a libctru call fails inexplicably inside
+the plugin, first ask whether it depends on `__appInit`.**
+
 ## Failure policy
 
 | Failure | Behaviour |

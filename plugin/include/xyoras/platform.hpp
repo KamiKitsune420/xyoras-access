@@ -19,6 +19,17 @@ namespace xyoras { namespace platform {
 
     bool IsSdmcMounted(void);
 
+    /// Allocates physically-contiguous ("linear") memory, which the audio
+    /// hardware requires because CSND reads buffers by physical address.
+    ///
+    /// libctru's linearAlloc CANNOT be used here: it draws from a linear heap
+    /// created during application startup, which a plugin never runs, so it
+    /// always returns null. This goes to the kernel directly instead.
+    ///
+    /// Returns nullptr on failure. Pass the SAME size to LinearFree.
+    void *LinearAlloc(u32 size);
+    void  LinearFree(void *ptr, u32 size);
+
 }}
 
 #endif

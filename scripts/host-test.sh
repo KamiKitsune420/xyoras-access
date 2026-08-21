@@ -25,9 +25,10 @@ mkdir -p "${OUT_DIR}"
 
 # Each test names the plugin sources it needs compiled alongside it, so the
 # tests exercise the shipped implementation rather than a copy of it.
-TESTS=(test_queue test_wav)
+TESTS=(test_queue test_wav test_bcwav)
 SRCS_test_queue="${ROOT}/plugin/source/speech/queue.cpp"
 SRCS_test_wav=""
+SRCS_test_bcwav=""
 
 INCLUDES="${ROOT}/plugin/include"
 

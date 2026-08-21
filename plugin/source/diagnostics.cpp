@@ -43,6 +43,11 @@ namespace xyoras { namespace diag {
 using CTRPluginFramework::File;
 
 namespace {
+    // Two independent markers. "self-test" asks for the report; "dump-audio"
+    // additionally diverts speech to .wav files. Keeping them separate means
+    // the self-test can exercise the real CSND path rather than only the
+    // debug one -- which is the only way to see what CSND is actually sent.
+    const char *kSelfTestPath   = "/xyoras-access/self-test";
     const char *kMarkerPath     = "/xyoras-access/dump-audio";
     const char *kReportPath     = "/xyoras-access/diagnostics.txt";
     const char *kCheckpointPath = "/xyoras-access/checkpoints.txt";
@@ -102,6 +107,11 @@ void Checkpoint(const char *stage)
     Append(kCheckpointPath, std::string("reached: ") + stage);
 }
 
+bool IsWavDumpRequested(void)
+{
+    return File::Exists(kMarkerPath) == 1;
+}
+
 bool IsSelfTestRequested(void)
 {
     // Must not use fopen: if fopen is the thing that is broken, checking with
@@ -110,7 +120,7 @@ bool IsSelfTestRequested(void)
     // Exists() returns 1 for "file exists", NOT 0 for success -- unlike every
     // other call in this API, which uses 0 for success. Getting that backwards
     // silently disabled the self-test once already.
-    return File::Exists(kMarkerPath) == 1;
+    return File::Exists(kSelfTestPath) == 1 || File::Exists(kMarkerPath) == 1;
 }
 
 void WriteReport(void)

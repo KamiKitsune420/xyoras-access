@@ -613,3 +613,106 @@ outside of playback itself.
 Standing caveat: everything here is emulator-observed. The `sdmc:` finding is
 mechanism-level (libctru startup code that plainly does not run in a plugin) so
 it should hold on hardware, but confirm it there before treating it as settled.
+
+---
+
+## 2026-08-20 — CSND path implemented and verified as far as an emulator allows
+
+**Question:** the user has no hardware access. Can the CSND playback path be
+verified at all?
+
+**Method:** searched for any emulator that implements CSND audio. **None does**
+-- Panda3DS's is a 104-line stub, and every Citra descendant (Azahar, CitraVR,
+Cytrus, mandarine-neo, libretro) shares the same stubbed `csnd_snd.cpp`. No
+issues, no PRs, nobody has attempted it.
+
+But Azahar's CSND is only *unfinished*, not absent: 535 lines that fully parse
+the command protocol and track every channel's encoding, buffer address, size,
+sample rate, volume and loop mode. The gap is literally:
+
+```cpp
+case CommandId::Start:
+    // TODO: start/stop the sound
+    break;
+```
+
+So while it cannot *play*, it can *receive and validate* everything we send.
+That is enough to prove the container and the library integration are correct.
+
+Implemented the real path (`bcwav.hpp`, `audio_cwav.cpp`) and ran it.
+
+### Finding: `linearAlloc` does not work in a plugin either
+
+Same root cause as the `sdmc:` finding: libctru's `linearAlloc` draws from a
+linear heap created during **application** startup, which a plugin never
+executes. It returns null every time.
+
+```
+reached: cwav: linearAlloc FAILED
+```
+
+This matters because CSND reads its buffers by **physical** address, so the
+audio data must be physically contiguous. Fixed in `platform.cpp` by asking the
+kernel directly:
+
+```c
+svcControlMemory(&addr, 0, 0, PageAlign(size), MEMOP_ALLOC_LINEAR, MEMPERM_READWRITE);
+```
+
+which is what libctru's own heap setup uses underneath. Sizes must be
+page-aligned or the call is rejected.
+
+**This is now the second instance of the same class of bug**, and it is worth
+generalising: *anything libctru sets up during application startup is absent in
+a plugin.* So far that is the `sdmc:` devoptab and the linear heap. Expect more
+-- romfs and the socket service are likely candidates. When a libctru API
+mysteriously fails in a plugin, check whether it depends on `__appInit` before
+assuming anything else.
+
+### Result: the CSND path works
+
+After the fix:
+
+```
+reached: cwav: play OK
+playback       : accepted
+
+CSND_SND::Initialize           x1
+CSND_SND::AcquireSoundChannels x1
+CSND_SND::ExecuteCommands      x5
+Unimplemented command ID       0
+```
+
+libcwav accepted our BCWAV, acquired a channel, and issued five command batches
+that Azahar parsed **without a single unrecognised command**. That verifies:
+
+- the BCWAV container we build is valid (libcwav's parser accepted it);
+- `svcConvertVAToPA` works as the VA->PA callback in a plugin;
+- linear allocation and cache flushing are correct enough to be accepted;
+- channel acquisition succeeds and the command stream is well-formed.
+
+Azahar's channel mask (`0xFFFFFF00`) matches real hardware, where CSND owns the
+upper channels.
+
+**What remains unverified is precisely one thing: whether the samples sound
+right coming out of a speaker.** Everything up to the emulator's missing mixer
+is now confirmed. That is as far as any emulator can take this without
+implementing CSND audio output, which nobody has done.
+
+### BCWAV format notes
+
+Written from libcwav's own parser rather than from documentation, since the
+parser is what actually has to accept the file. Non-obvious points:
+
+- `version` must be exactly `0x02010000`; `blockCount` exactly 2.
+- The INFO block's own `header.size` must equal the size in the file header's
+  reference, or the load fails with `INVAID_INFO_BLOCK`.
+- Channel-info reference offsets are relative to **`&channelInfoRefs.count`**,
+  not to the file or the block.
+- The sample reference offset is relative to the DATA block's `data` **field**
+  -- i.e. 8 bytes past the block start.
+
+`tools/host-test/test_bcwav.cpp` asserts all of this against the generated
+bytes: 32 checks mirroring each condition libcwav tests. Worth having, because
+a single wrong field yields an opaque status code whose only symptom on a
+console is silence.

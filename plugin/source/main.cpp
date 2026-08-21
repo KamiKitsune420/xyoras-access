@@ -14,6 +14,7 @@
 
 namespace xyoras { namespace diag {
     bool IsSelfTestRequested(void);
+    bool IsWavDumpRequested(void);
     void RunSelfTest(void);
     void Checkpoint(const char *stage);
     void ProbeFopen(const char *when);
@@ -181,8 +182,8 @@ namespace CTRPluginFramework
 
         // Speech comes up before the menu is populated so the status entry can
         // report honestly whether it started.
-        speech::Init(selfTest ? speech::AudioBackend::WavDump
-                              : speech::AudioBackend::Csnd);
+        speech::Init(diag::IsWavDumpRequested() ? speech::AudioBackend::WavDump
+                                                : speech::AudioBackend::Csnd);
 
         diag::Checkpoint(speech::IsAvailable() ? "speech started"
                                               : "speech FAILED to start");
