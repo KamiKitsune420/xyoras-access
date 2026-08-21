@@ -86,6 +86,19 @@ namespace {
         return game::Read16(address, out);
     }
 
+    /// Block reader for the scan. game::ReadBuf performs one permission check
+    /// for the whole block, which is the entire point: the word-at-a-time scan
+    /// would do 3.6 million of them, this does one per page.
+    bool ReadBlock(u32 address, void *out, u32 size, void * /*ctx*/)
+    {
+        return game::ReadBuf(address, out, size);
+    }
+
+    /// Scratch for the scan. A page at a time, kept out of the thread stack --
+    /// 16 KB of stack is not the place for it, and allocating per scan inside
+    /// a game process is worth avoiding.
+    u32 g_scanBuffer[vtscan::kPageSize / 4];
+
     /// Full heap scan for text panes. Deliberately rare -- see panecache.hpp.
     void Rescan(void)
     {
@@ -98,9 +111,9 @@ namespace {
         }
 
         std::vector<u32> hits(kMaxPanes, 0);
-        const u32 found = vtscan::FindObjects(ReadWord, nullptr,
-                                              game::kHeapMin, game::kHeapMax,
-                                              vtable, &hits[0], kMaxPanes);
+        const u32 found = vtscan::FindObjectsBlockwise(
+            ReadBlock, nullptr, game::kHeapMin, game::kHeapMax, vtable,
+            &hits[0], kMaxPanes, g_scanBuffer, vtscan::kPageSize / 4);
 
         // FindObjects reports the true total even when it wrote fewer, which
         // is the point: "155" and "half a million" say very different things

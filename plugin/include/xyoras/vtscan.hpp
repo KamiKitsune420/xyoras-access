@@ -83,6 +83,94 @@ namespace xyoras { namespace vtscan {
                            vtable, hits, maxHits);
     }
 
+    // -------------------------------------------------------------------------
+    // Blockwise scanning
+    //
+    // FindObjects above reads one word at a time, and on real hardware every
+    // one of those goes through a range check and a permission query before it
+    // touches anything. Over the whole heap that is 3.6 million of them, which
+    // is not a scan so much as a stall.
+    //
+    // Reading a page at a time and searching it locally does the same work with
+    // one check per page instead of one per word -- about 880 checks rather
+    // than 3,600,000. The word-at-a-time version stays because it is the
+    // simplest thing that can be pointed at an arbitrary range.
+    // -------------------------------------------------------------------------
+
+    /// Copies `size` bytes into `out`. Returns false if any of it is
+    /// unreadable, in which case the whole block is skipped -- which is why
+    /// blocks must not straddle a page boundary.
+    typedef bool (*ReadBlockFn)(u32 address, void *out, u32 size, void *ctx);
+
+    /// The 3DS page size. A block that stayed inside one page can only fail as
+    /// a whole, so nothing readable is ever lost by skipping it.
+    constexpr u32 kPageSize = 0x1000;
+
+    /// Scans [start, end) a block at a time, using a caller-supplied buffer.
+    ///
+    /// The buffer comes from the caller because this runs inside a game
+    /// process where allocation is worth avoiding, and because the host tests
+    /// then exercise the same code with no allocator at all.
+    ///
+    /// `bufferWords` is clamped to a page. `start` must be block-aligned;
+    /// otherwise a block could span two pages and one unmapped neighbour would
+    /// discard everything mapped beside it.
+    ///
+    /// Returns the true number of matches, as FindObjects does.
+    inline u32 FindObjectsBlockwise(ReadBlockFn readBlock, void *ctx,
+                                    u32 start, u32 end, u32 vtable,
+                                    u32 *hits, u32 maxHits,
+                                    u32 *buffer, u32 bufferWords)
+    {
+        if (readBlock == nullptr || buffer == nullptr || bufferWords == 0)
+            return 0;
+        if (!PlausibleVtable(vtable))
+            return 0;
+        if (start >= end || (start & 3) != 0)
+            return 0;
+
+        // Clamp to a page, then down to a power of two, so a block can never
+        // straddle a page boundary.
+        u32 words = bufferWords;
+        if (words > kPageSize / 4)
+            words = kPageSize / 4;
+
+        u32 pow2 = 1;
+        while (pow2 * 2 <= words)
+            pow2 *= 2;
+        words = pow2;
+
+        const u32 blockBytes = words * 4;
+        if ((start & (blockBytes - 1)) != 0)
+            return 0;
+
+        u32 total = 0;
+        for (u32 base = start; base < end; base += blockBytes)
+        {
+            // The last block may run past `end`; read only as far as asked.
+            u32 wantBytes = blockBytes;
+            if (end - base < wantBytes)
+                wantBytes = (end - base) & ~3u;
+            if (wantBytes == 0)
+                break;
+
+            if (!readBlock(base, buffer, wantBytes, ctx))
+                continue;       // unmapped: skip the block, not the scan
+
+            const u32 wantWords = wantBytes / 4;
+            for (u32 i = 0; i < wantWords; ++i)
+            {
+                if (buffer[i] != vtable)
+                    continue;
+
+                if (hits != nullptr && total < maxHits)
+                    hits[total] = base + i * 4;
+                ++total;
+            }
+        }
+        return total;
+    }
+
     /// Reads the vtable pointer of a candidate object.
     ///
     /// Useful in the other direction: given an address believed to hold an

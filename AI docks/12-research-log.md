@@ -1435,3 +1435,30 @@ Two cases came out of writing the tests rather than the code:
   indistinguishable from a deliberate press, and would silently eat the tap.
   They join the mask when the directional commands are actually implemented,
   and that will need a way to tell walking from a press.
+
+### The scan now reads a page at a time
+
+Every `game::Read32` carries a range check plus a `Process::CheckAddress`
+permission query before it touches anything. Over the heap window that is
+`(0x08DF0000 - 0x08000000) / 4` = **3,653,632** of them per scan — not a scan
+so much as a stall, and the reason the previous note said a full scan was "far
+too slow to run per frame".
+
+`vtscan::FindObjectsBlockwise` reads a page into a buffer with one check and
+searches it locally: **3,568 checks instead of 3,653,632**, a thousandfold
+reduction in guard overhead. Same answers — the tests assert both halves of
+that, because a faster scan that quietly misses objects is worse than a slow
+one.
+
+Blocks must not straddle a page boundary. A block read fails as a whole, so a
+block spanning a mapped and an unmapped page would silently discard everything
+mapped beside it; an unaligned start is refused outright rather than scanned
+badly. `Process::CheckAddress` only checks the address it is given, which is
+the other reason blocks stay inside one page.
+
+The word-at-a-time `FindObjects` stays. It is the simplest thing that can be
+pointed at an arbitrary range, and it is what the block version is checked
+against.
+
+This is still **unmeasured on hardware**. It is a thousand times less guard
+overhead, not a measurement.
