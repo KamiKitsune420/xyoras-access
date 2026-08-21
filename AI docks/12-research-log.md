@@ -1231,3 +1231,65 @@ not expose to us. Worth trying next: synthesising key events to the Azahar
 window from the host, which would let the game be driven far enough to open a
 dialogue box, at which point `TalkWindow` should appear in a scan and its
 `StrBuf` should hold readable text.
+
+---
+
+## 2026-08-21 — Reading real game text out of a running game
+
+**The capability is proved.** Text displayed by Pokemon X was read out of the
+emulated console's memory, live:
+
+```
+0x08202C70:  0045 0073 0074 006F 006E 0069 0061 0000   "Estonia"
+0x08205768:  0048 0075 006E 0067 0072 00ED 0061 0000   "Hungria"  (with an accented i)
+```
+
+UTF-16LE, NUL-terminated, exactly as expected. These are country names from the
+initial-setup screen.
+
+### Driving the game without a person
+
+The emulator exposes no way to script input, so it was added: an env-gated hook
+in the HID pad callback (`XYORAS_AUTO_PRESS`) that synthesises button presses,
+held and released on a slow cycle because menus need to see an edge rather than
+a held button.
+
+Pressing only `A` reaches the name-entry keyboard and stops dead -- that screen
+needs a cursor moved and a confirm, which one repeated button can never do.
+Cycling a list (`a,a,start,a,right,a,down,a,start`) gets through it, and the
+game reaches the overworld: `DllField`, `DllFieldDemo`,
+`DllFieldEventEntranceIn`, `DllPssMainMenu` all load, and a screenshot confirms
+the player standing in a house with the PSS menu on the bottom screen.
+
+### Which class actually holds displayed text
+
+Corrected from the previous entry. `gfl::str::StrBuf` is **not** where on-screen
+text lives -- 42 to 59 instances exist at any time and every one examined had an
+empty buffer. They are pooled formatting buffers.
+
+The text is in **`nw::lyt::TextBox`** (vptr `0x00596148`), the NintendoWare
+layout text pane. Live counts track the screen exactly: 0 during a transition,
+155 on a text-heavy setup screen, 21 on a sparse one. `nw::lyt::Pane`
+(`0x00595F24`) runs 31-76 in parallel.
+
+| Class | vptr | role |
+| --- | --- | --- |
+| `nw::lyt::TextBox` | `0x00596148` | **holds displayed text** |
+| `nw::lyt::Pane` | `0x00595F24` | layout panes generally |
+| `gfl::str::StrBuf` | `0x00598570` | pooled formatting buffer, usually empty |
+
+### What is not yet pinned down
+
+The exact offset of the string within `TextBox` is not established. The dumps
+above were taken at addresses a previous scan had reported, and by the next run
+the heap had moved -- what they landed on was text buffers rather than object
+headers. Since object addresses shift between boots, the durable approach is to
+scan by vptr each time and walk the object, not to record addresses.
+
+Also unverified: whether `app::tool::TalkWindow` is the field dialogue box. It
+never appeared in any scan, including in the overworld, so either it is
+constructed only while a message is open (the scans may simply have missed the
+window) or field dialogue uses a different class inside `DllField.cro`.
+
+**Standing caveats:** everything here is Pokemon X under emulation. Nothing has
+been checked on hardware, and nothing at all has been checked for ORAS.
