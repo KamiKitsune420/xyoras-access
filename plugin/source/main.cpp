@@ -7,6 +7,8 @@
  */
 #include "xyoras/common.hpp"
 #include "xyoras/game.hpp"
+#include "xyoras/hotkeys.hpp"
+#include "xyoras/narrate.hpp"
 #include "xyoras/platform.hpp"
 #include "xyoras/speech.hpp"
 
@@ -41,6 +43,14 @@ namespace CTRPluginFramework
             banner += ".";
 
             speech::Say(speech::Priority::Critical, banner);
+
+            // A blind player has no way to discover a control scheme. The one
+            // command that exists is announced; the rest join this as they land.
+            if (features::narrate::IsRunning())
+            {
+                speech::Say(speech::Priority::Critical,
+                            "Tap Z L, or L and R together, to read the screen.");
+            }
 
             // Better to say plainly that readings cannot be trusted than to
             // speak confident nonsense derived from the wrong offsets.
@@ -110,6 +120,55 @@ namespace CTRPluginFramework
                              : "Now playing speech through CSND.")();
         }
 
+        void ShowNarrationStatus(MenuEntry *)
+        {
+            // Rebuilt on every open: the pane count is the whole point, and it
+            // changes with the screen.
+            std::string text = "Narration: ";
+            text += features::narrate::IsRunning() ? "running" : "off";
+            text += "\nText panes being polled: ";
+            text += std::to_string(features::narrate::TrackedPanes());
+            text += "\n\nA plausible count is a few dozen to about 155 on a\n"
+                    "text-heavy screen, and 0 during a transition. Zero that\n"
+                    "never changes means the scan is not finding anything.";
+
+            MessageBox("Narration", text)();
+        }
+
+        void ToggleNarration(MenuEntry *)
+        {
+            if (features::narrate::IsRunning())
+            {
+                features::narrate::Stop();
+                speech::Say(speech::Priority::Interrupt, "Narration off.");
+                return;
+            }
+
+            if (features::narrate::Start())
+            {
+                speech::Say(speech::Priority::Interrupt, "Narration on.");
+            }
+            else
+            {
+                MessageBox("Narration",
+                           "Could not start.\n\n"
+                           "This happens when the game or its update version has\n"
+                           "not been verified, or when there is no known address\n"
+                           "for this game. Reading memory anyway would produce\n"
+                           "confident nonsense.")();
+            }
+        }
+
+        void BuildNarrationEntries(PluginMenu &menu)
+        {
+            menu.Append(new MenuEntry("Toggle narration", nullptr, ToggleNarration,
+                "Turns the reading of on-screen text on or off."));
+
+            menu.Append(new MenuEntry("Narration status", nullptr, ShowNarrationStatus,
+                "Shows whether narration is running and how many text panes it "
+                "is watching."));
+        }
+
         void BuildSpeechEntries(PluginMenu &menu)
         {
             menu.Append(new MenuEntry("Test speech", nullptr, TestSpeech,
@@ -141,6 +200,7 @@ namespace CTRPluginFramework
     /// Runs when the process exits. Undo patches, release resources.
     void OnProcessExit(void)
     {
+        features::narrate::Stop();
         speech::Shutdown();
     }
 
@@ -148,6 +208,22 @@ namespace CTRPluginFramework
     {
         BuildStatusEntry(menu);
         BuildSpeechEntries(menu);
+        BuildNarrationEntries(menu);
+    }
+
+    /// Runs once per frame on the game thread. Everything it calls returns
+    /// immediately -- see rule 3 in CLAUDE.md.
+    void OnFrame(void)
+    {
+        features::hotkeys::Update();
+    }
+
+    /// The settings menu takes the buttons while it is open. Without this the
+    /// modifier looks released on the way back out and the screen gets read
+    /// aloud unbidden.
+    void OnMenuClosing(void)
+    {
+        features::hotkeys::Reset();
     }
 
     int main(void)
@@ -190,6 +266,15 @@ namespace CTRPluginFramework
 
         InitMenu(*menu);
 
+        menu->Callback(OnFrame);
+        menu->OnClosing = OnMenuClosing;
+
+        // Narration reads game memory, so it only starts on a build whose
+        // addresses have been verified. Start() says no rather than guessing.
+        const bool narrating = features::narrate::Start();
+        diag::Checkpoint(narrating ? "narration started"
+                                   : "narration not started (unverified game)");
+
         AnnounceStartup();
 
         if (selfTest)
@@ -198,6 +283,8 @@ namespace CTRPluginFramework
         diag::Checkpoint("entering menu loop");
 
         menu->Run();
+
+        features::narrate::Stop();
 
         delete menu;
 

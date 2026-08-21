@@ -14,7 +14,7 @@
  * "AI docks/12-research-log.md" and "AI docks/14-legal-and-licensing.md".
  * Method for confirming them: "AI docks/04-gen6-reverse-engineering.md".
  */
-#include "xyoras/game.hpp"
+#include "xyoras/addresses.hpp"
 
 namespace xyoras { namespace game { namespace addr {
 
@@ -155,16 +155,12 @@ namespace xyoras { namespace game { namespace addr {
     /// nw::lyt::Pane -- layout panes generally.
     const AddrPair kVtPane         = { 0x00595F24, 0 };
 
-    /// Offset within a TextBox of the pointer to its UTF-16 string.
-    ///
-    /// VERIFIED in a running game: reading it yields the actual displayed
-    /// text -- "Your name?", "Delete", "Space", "SAVE", and message-box
-    /// content. Stable at this offset across every screen observed.
-    ///
-    /// TextBox derives from nw::lyt::Pane, whose name, transform, size and
-    /// child links occupy everything before it -- which is why a search
-    /// limited to the first 0xA0 bytes found nothing.
-    const u32 kTextBoxStringOffset = 0xD4;
+    // The offset of the string pointer within a TextBox (+0xD4) is NOT here.
+    // It is a structure offset rather than an address, it is the same for
+    // every series, and the code that uses it -- textbox.hpp -- must stay free
+    // of anything 3DS-specific so the host tests can drive it. It is defined
+    // once, as textbox::kStringOffset, with the evidence for it. Defining it
+    // twice is how the two copies drift apart.
 
     // -------------------------------------------------------------------------
     // Not yet found — the work of Phase 2

@@ -10,7 +10,15 @@ Summary: Accessibility for Pokemon Gen 6
 Description: Speaks dialogue, menus, battles, and the map aloud for blind and low-vision players. Pokemon X, Y, Omega Ruby, and Alpha Sapphire.
 Compatibility: Any
 
-# Heap reserved for the plugin. eSpeak NG's voice data and synthesis buffers
-# dominate this; see "AI docks/05-plugin-architecture.md" for the budget.
-# Measure real usage before lowering it.
-MemorySize: 12MiB
+# Heap reserved for the plugin, taken from the game's own. eSpeak NG's voice
+# data and synthesis buffers dominate it; see "AI docks/05-plugin-architecture.md".
+#
+# 3gxtool accepts ONLY "2MiB", "5MiB" or "10MiB". Anything else is rejected
+# with a warning and silently replaced by 5MiB -- which is what this plugin
+# actually ran on throughout emulator testing, because this field previously
+# said "12MiB". Speech worked there at 5MiB.
+#
+# 10MiB is set here for headroom, but it takes that memory from the game. If
+# the game misbehaves on hardware, dropping back to 5MiB is the first thing to
+# try, and it is known to be enough for speech.
+MemorySize: 10MiB

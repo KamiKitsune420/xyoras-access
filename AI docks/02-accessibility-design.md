@@ -118,6 +118,7 @@ press a key. The modifier is configurable.
 
 | Chord | Action |
 | --- | --- |
+| Mod tapped alone | **Read the whole screen** (implemented) |
 | Mod + `A` | Repeat last utterance |
 | Mod + `B` | Stop speech |
 | Mod + `X` | Position report (map, coordinates, facing) |
@@ -130,8 +131,25 @@ press a key. The modifier is configurable.
 | Mod + `Start` | Open the mod's settings menu (CTRPF menu) |
 | Mod + `Select` | Toggle verbosity (terse / verbose) |
 
+Reading the screen has no partner key because there is no button left to give
+it, and it is the command a player reaches for most. Tapping the modifier and
+releasing it without pressing anything else is the "say all" every screen
+reader has. It works identically on both console models.
+
+The cost is that the modifier cannot act until it is released — until then
+there is no way to know whether a partner key is coming. That is a few frames,
+and it applies to nothing else in the scheme.
+
+Pressing the modifier together with a key that is not bound yet does **nothing**
+and also cancels the tap, so a player exploring the controls never gets an
+unexpected screen read. The directional keys are deliberately excluded from the
+chord layer for now: walking means holding a direction, and a direction arriving
+mid-chord is indistinguishable from a deliberate press.
+
 While the CTRPF settings menu is open, the game is paused and the menu itself
-is spoken, so the settings are reachable without sight.
+is spoken, so the settings are reachable without sight. Opening it also cancels
+any chord in progress, so the modifier does not appear to be released on the way
+back out.
 
 ## Settings
 

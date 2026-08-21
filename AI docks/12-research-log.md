@@ -1354,3 +1354,84 @@ completely: `nw::lyt` is in `code.bin`, so the address does not move.
 Nothing checked on hardware; nothing at all checked for ORAS. A full-heap scan
 is far too slow to run per frame, so a real implementation needs to find the
 objects once and then poll them, or narrow the scan considerably.
+
+---
+
+## 2026-08-21 — Wiring the text reader into the plugin
+
+The scan-and-read approach above is now plugged into the running plugin:
+`plugin/source/features/narrate.cpp`, with `panecache.hpp` deciding how often
+the expensive scan is worth repeating and `hotkeys.hpp` giving the player a way
+to ask for a full read.
+
+Still **UNTESTED ON HARDWARE**. Every decision below is covered by host tests;
+none of the threading or CTRPF glue has run on a console.
+
+### Scan cost forced the design
+
+A full-heap scan reads `(0x08DF0000 - 0x08000000) / 4` ≈ **3.6 million words**.
+That cannot happen per frame, so the two halves are separated: scan rarely to
+find the objects, poll those addresses often. `panecache::Cache` holds the
+policy — rescan every 60 polls, or immediately once half the cached panes stop
+reading, which is what a screen change looks like from the inside.
+
+The scan cost on real hardware is **unmeasured** and is the single thing most
+likely to need changing. If it turns out to cost more than a frame even once a
+second, the fallback is to narrow the scanned range: the panes observed so far
+would tell us which part of the heap actually holds them.
+
+### Polling runs on its own thread
+
+Rule 3 says speech must not block the game thread, and the same has to hold for
+the reading that feeds it — a poll reads every tracked pane, and a scan reads
+millions of words. So `narrate.cpp` owns a thread and the public surface is
+only flags: `RequestReadScreen()` and `RequestNewContext()` set a bit and
+return. Nothing outside that file touches the cache or the narrator, so no lock
+is ever held across anything slow.
+
+The thread runs at the caller's priority **+1** (lower priority; on the 3DS a
+higher number is lower priority), so polling never preempts rendering.
+
+### Two build problems found while wiring this up
+
+- **`MemorySize: 12MiB` in the `.plgInfo` was never in effect.** 3gxtool
+  accepts only `2MiB`, `5MiB` or `10MiB`; anything else is rejected with a
+  warning and silently replaced by **5MiB**. So every emulator test so far ran
+  on 5MiB, and speech worked there. Now set to `10MiB` explicitly. If the game
+  misbehaves on hardware, dropping to 5MiB is the first thing to try — it is
+  known to be enough.
+- **Editing the `.plgInfo` did not rebuild the `.3gx`.** It was not listed as a
+  prerequisite, so metadata changes silently shipped the old values and looked
+  like they did nothing. Fixed in `plugin/Makefile`.
+
+### The address table had no header
+
+Every `AddrPair` lived in `addresses.cpp` with no declaration anywhere, so no
+feature code could reach one — rule 4 says go through the dispatch layer, and
+there was nothing to go through. Added `plugin/include/xyoras/addresses.hpp`.
+
+`kTextBoxStringOffset` was **removed** from the table rather than declared. It
+is a structure offset rather than an address, and it was defined twice — once
+there and once as `textbox::kStringOffset`. `textbox.hpp` has to stay free of
+anything 3DS-specific so the host tests can drive it, so that copy is the one
+that survives.
+
+### Read-screen has no spare button, so it is the modifier tapped alone
+
+The control scheme in `02-accessibility-design.md` had no chord for reading the
+whole screen, and every button was already spoken for. It is now the modifier
+(ZL, or L+R together) **pressed and released with nothing else** — the "say
+all" every screen reader has, costing no button and working on both console
+models.
+
+Two cases came out of writing the tests rather than the code:
+
+- **L+R can never be pressed on the same frame.** One of them always arrives a
+  frame later, which looks exactly like a partner key and would have consumed
+  every chord before it began. The modifier's own buttons are excluded from
+  partner detection.
+- **The directional keys had to be excluded from the chord layer entirely.**
+  Walking means holding a direction; a direction arriving mid-chord is
+  indistinguishable from a deliberate press, and would silently eat the tap.
+  They join the mask when the directional commands are actually implemented,
+  and that will need a way to tell walking from a press.

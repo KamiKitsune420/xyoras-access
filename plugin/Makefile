@@ -161,7 +161,10 @@ $(OFILES_SRC) : $(HFILES_BIN)
 # -s embeds the symbol table, which makes crash addresses resolvable.
 GXTOOL := $(shell command -v 3gxtool 2>/dev/null || echo "$(DEVKITPRO)/tools/bin/3gxtool.exe")
 
-%.3gx: %.elf
+# The plgInfo is an input, not just documentation: it carries the memory size
+# and the metadata Rosalina shows. Without it listed here, editing it leaves
+# the old values baked into the .3gx and the change looks like it did nothing.
+%.3gx: %.elf $(TOPDIR)/$(PLGINFO)
 	@echo "creating $(notdir $@)"
 	@$(GXTOOL) -s $< $(TOPDIR)/$(PLGINFO) $@
 
