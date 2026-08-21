@@ -839,3 +839,85 @@ About two hours: ~1.5 GB clone, Qt auto-download, ~2100 objects. Two false
 starts (Qt-free build, wrong TODO) plus repeated loss of the build when its
 launching shell was killed -- fixed by launching detached so the build outlives
 the process that started it.
+
+---
+
+## 2026-08-21 — Gen 6 is 84 CRO modules, not one executable
+
+**Question:** where is the message-box render path?
+
+**Method:** dumped the decrypted, LZSS-decompressed executable by adding an
+env-gated hook to Azahar's NCCH loader (`XYORAS_DUMP_CODE`), then examined its
+strings. The dump is 5,156,864 bytes. It is copyrighted game code and lives
+outside the repository; only observations are recorded here.
+
+**Finding: most game logic is not in `code.bin` at all.** The executable
+references **84 dynamically-loaded CRO modules**, one per subsystem:
+
+| Module | Subsystem |
+| --- | --- |
+| `DllField.cro` | Overworld |
+| `DllBattle.cro` | Battles |
+| **`DllDialogCommon.cro`** | **Common dialogue -- the likely message box** |
+| `DllPokeList.cro` | Party list |
+| `DllBag.cro` | Bag |
+| `DllStatus.cro` | Pokemon summary |
+| `DllBox.cro` | Storage |
+| `DllZukan.cro` | Pokedex |
+| `DllStartMenu.cro` | Start menu |
+| `DllTownmap.cro` | Town map |
+| `DllStrInput.cro` | Text entry |
+| `DllNumberInput.cro` | Number entry |
+| `DllConfig.cro` | Options |
+| `DllTitle.cro`, `DllIntro.cro`, `DllLangSelect.cro` | Boot sequence |
+| `DllPss*.cro` (9 modules) | Player Search System |
+| `DllField*.cro` (6 more) | Individual field events |
+
+Full list preserved in `04-gen6-reverse-engineering.md`.
+
+**Why this matters more than it first appears.** The address table this project
+is built around assumes fixed addresses in a single executable. That model is
+wrong for anything living in a CRO:
+
+- CROs are loaded and unloaded on demand, so a module is only in memory while
+  its subsystem is active.
+- They are relocated at load time, so their addresses are **not fixed** across
+  boots. Azahar's own log shows this directly:
+  `RO::LoadCRO: CRO "DllLangSelect" loaded at 0x006A5000`.
+- A hook into `DllDialogCommon.cro` must therefore be installed *after* the
+  module loads, at an address computed from that module's base -- not from a
+  constant.
+
+So the plan of "find the message render function's address" needs replacing
+with "find the module, learn where it was loaded this time, and hook at
+base + offset". The dispatch layer needs a CRO-aware level above the existing
+XY/ORAS split.
+
+This also explains something noticed earlier and not understood: the inherited
+community offsets all sit in two narrow bands (`0x8C7xxxx`/`0x81FFxxx`). Those
+are static allocations reachable from `code.bin`, which is exactly the subset a
+fixed-address cheat table *can* address. Everything else needed a different
+technique, which is presumably why nobody had it.
+
+### Also found
+
+Developer paths survive in the binary, confirming Game Freak's library layout:
+
+```
+c:\homehudson\xy_project\prog\src/system/motion/Motion.cpp
+c:\home\gflib_cpp_final\gflib\prog\include\base/gfl_Singleton.h
+c:\home\gflib_cpp_final\gflnet\prog\src/...        (24 paths)
+```
+
+`gflib` is Game Freak's engine library and `gfl_` is its symbol prefix -- useful
+when reading disassembly. Note `gfl_Singleton.h`: major subsystems are
+singletons, so there is likely a small set of global instance pointers rather
+than parameters threaded through call chains.
+
+Most "Message"-containing strings are Nintendo SDK noise (`nn::nex` networking,
+UDS local wireless), not game text. `rom:/DllPssMessageWindow.cro` is the PSS
+chat window, not the field message box.
+
+**Next:** CROs carry export tables and Azahar already parses them
+(`CROHelper::ApplyModuleExport`). If those exports are named, they may identify
+the message entry point directly. That is the thread to pull.

@@ -59,6 +59,48 @@ generated table compiled into the plugin — because it unblocks everything
 else, and keep (1) as the path for *dynamic* text (dialogue) which we cannot
 ship. Dialogue is read from RAM as the game renders it, not from RomFS.
 
+## The game is 84 CRO modules
+
+**Most Gen 6 logic is not in `code.bin`.** The executable loads 84 CRO modules
+(dynamically-linked libraries), one per subsystem, on demand. Confirmed by
+dumping the executable and reading its strings -- see `12-research-log.md`.
+
+The ones that matter to us:
+
+| Module | Subsystem |
+| --- | --- |
+| `DllDialogCommon.cro` | Common dialogue -- the likely message box |
+| `DllField.cro` | Overworld |
+| `DllBattle.cro` | Battles |
+| `DllPokeList.cro` | Party list |
+| `DllBag.cro` | Bag |
+| `DllStatus.cro` | Pokemon summary |
+| `DllBox.cro` | Storage |
+| `DllZukan.cro` | Pokedex |
+| `DllStartMenu.cro` | Start menu |
+| `DllTownmap.cro` | Town map |
+| `DllStrInput.cro` / `DllNumberInput.cro` | Text and number entry |
+| `DllConfig.cro` | Options |
+| `DllTitle.cro` / `DllIntro.cro` / `DllLangSelect.cro` | Boot sequence |
+
+Plus nine `DllPss*` modules for the Player Search System and six more
+`DllField*` modules for individual field events.
+
+### What this means for hooking
+
+CROs are **relocated at load time**, so their addresses are not constant across
+boots. A hook into a CRO cannot use a fixed address; it has to be installed
+after the module loads, at `module_base + offset`.
+
+That needs a level of dispatch above the XY/ORAS split: find the loaded module,
+read its base, then apply an offset that is constant *within* the module. The
+module list and per-module offsets are stable; only the base moves.
+
+It also explains why the inherited community offsets all cluster in two narrow
+bands. Those are static allocations reachable from `code.bin` -- the subset a
+fixed-address cheat table can express. Anything inside a CRO was out of reach
+of that technique.
+
 ## RAM: the hard part
 
 Gen 6 games allocate from **heaps**, not fixed addresses. Most interesting
