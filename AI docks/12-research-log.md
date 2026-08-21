@@ -514,3 +514,102 @@ checks across two suites, all passing.
 rules read as obviously correct in isolation, and the implementation faithfully
 matched one of them. It took writing down an expectation as an executable
 assertion to notice they could not both hold.
+
+---
+
+## 2026-08-20 — Speech works. Two findings, one of them a near-miss.
+
+**Correction to the previous entry.** It claimed CTRPF cannot run under Azahar
+because `svcCustomBackdoor` is unimplemented. **That was wrong.** The
+unimplemented SVC is logged but is not fatal: with checkpoint instrumentation
+in place, the plugin's `main()` demonstrably runs. The earlier conclusion
+mistook "the plugin produced no files" for "the plugin did not run", and two
+different causes fitted the same evidence.
+
+### Finding 1: stdio does not work in a game process
+
+**`fopen` fails inside a plugin.** Measured directly:
+
+```
+reached: fopen FAILED before mount
+reached: fsInit ok
+reached: archiveMountSdmc ok
+reached: fopen WORKS after mount
+```
+
+A homebrew application gets the `sdmc:` devoptab registered by libctru's
+startup before `main()`. A plugin is injected into an already-running game and
+never goes through that path, so stdio cannot resolve `sdmc:` at all.
+
+This nearly sank the whole speech design: **eSpeak reads every one of its data
+files -- `phondata`, `phontab`, `phonindex`, `en_dict` -- through stdio.**
+
+The fix is one call, made before speech starts (`platform.cpp`):
+
+```c
+fsInit();
+archiveMountSdmc();
+```
+
+Note `archiveMountSdmc`, not `sdmcInit`. The latter appears in older
+documentation and community code but is not exported by current libctru at all
+-- `arm-none-eabi-nm` on `libctru.a` shows no such symbol.
+
+### Finding 2: eSpeak hangs rather than failing when data is missing
+
+With no readable voice data, `espeak_Initialize` **never returns**. It does not
+return an error; it hangs, on the plugin's own thread, taking the mod down
+silently. For a blind player that is the worst possible failure: no banner, no
+speech, no way to discover why.
+
+Guarded in `synth_espeak.cpp` by checking the four required files are openable
+before handing control to eSpeak. Verified by deliberately hiding the voice
+data:
+
+```
+reached: espeak: voice data missing, refusing to initialise
+reached: speech: synth Init FAILED
+reached: speech FAILED to start
+reached: entering menu loop          <- game still playable
+```
+
+The diagnostics report then names the missing files. This is rule 5 in
+`CLAUDE.md` demonstrated rather than assumed.
+
+### The pipeline works end to end
+
+```
+plain fopen    : WORKING
+subsystem      : started
+sample rate    : 22050 Hz
+synthesis      : ok
+samples        : 128199
+audio length   : 5814 ms
+synth time     : 334 ms
+realtime factor: 17.40x
+playback       : accepted
+```
+
+Two `.wav` files were produced and verified to contain real speech: 3.24 s and
+6.15 s, RMS ~3300, peak ~29000 (no clipping), 57% voiced frames -- a normal
+speech duty cycle, not noise. Copies kept in `dist/sample-speech/`.
+
+**Read the realtime factor with care.** It is measured under emulation, and
+while Azahar derives guest time from emulated cycle counts rather than host
+wall-clock, dynarmic's cycle accounting is approximate. Treat 17x as
+"comfortably faster than real time, probably by a wide margin" and not as a
+hardware number. Old 3DS runs at roughly a third of New 3DS's clock, so even a
+large error leaves headroom -- but the Phase 1 exit measurement still has to be
+taken on hardware.
+
+### What this changes
+
+Azahar is far more useful than the previous entry concluded. It cannot play
+audio (CSND is stubbed) and it cannot be trusted for timing, but it **can** run
+the plugin, run CTRPF, run eSpeak, and exercise file access. Combined with the
+WAV backend and the checkpoint instrumentation, that covers most of the plugin
+outside of playback itself.
+
+Standing caveat: everything here is emulator-observed. The `sdmc:` finding is
+mechanism-level (libctru startup code that plainly does not run in a plugin) so
+it should hold on hardware, but confirm it there before treating it as settled.

@@ -44,6 +44,14 @@ namespace xyoras
     /// felt, and this can be reached from paths that run every frame.
     void Log(const std::string &message);
     void SetLogEnabled(bool enabled);
+
+    namespace diag
+    {
+        /// Appends a line to /xyoras-access/checkpoints.txt through CTRPF's
+        /// File API. Startup instrumentation only -- it opens and closes the
+        /// file on every call, so it is far too slow for anything per-frame.
+        void Checkpoint(const char *stage);
+    }
 }
 
 #endif

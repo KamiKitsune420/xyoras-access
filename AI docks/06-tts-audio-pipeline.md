@@ -61,6 +61,25 @@ eSpeak is driven in **synth-callback** mode: `espeak_SetSynthCallback` receives
 PCM as it is produced, so we can stream into our own buffer without eSpeak ever
 touching an audio device.
 
+### stdio must be made to work first
+
+**eSpeak reads all of its voice data through stdio, and stdio does not work in
+a plugin until you mount the SD yourself.** A homebrew application gets the
+`sdmc:` devoptab registered by libctru before `main()`; a plugin is injected
+into a running game and never goes through that path, so every `fopen` fails.
+
+`platform::MountSdmc()` does it, and must be called before speech starts:
+
+```c
+fsInit();
+archiveMountSdmc();   // NOT sdmcInit -- that is not exported by current libctru
+```
+
+Worse, eSpeak does not fail cleanly without its data: `espeak_Initialize`
+**hangs**. So the four required files are checked for readability before eSpeak
+is given control. Both behaviours were measured, not guessed --
+`12-research-log.md`.
+
 ### Voice data
 
 eSpeak needs its `espeak-ng-data` directory at runtime. Options:

@@ -129,11 +129,23 @@ bool Init(AudioBackend backend)
 
     // Either failing leaves the plugin alive but mute. The settings menu can
     // then report why, which is more useful than a silent no-op.
-    if (!g_synth->Init() || !g_audio->Init())
+    diag::Checkpoint("speech: initialising synth");
+    if (!g_synth->Init())
     {
+        diag::Checkpoint("speech: synth Init FAILED");
         Shutdown();
         return false;
     }
+
+    diag::Checkpoint("speech: synth ok, initialising audio");
+    if (!g_audio->Init())
+    {
+        diag::Checkpoint("speech: audio Init FAILED");
+        Shutdown();
+        return false;
+    }
+
+    diag::Checkpoint("speech: audio ok, starting worker");
 
     g_running = true;
     g_worker  = threadCreate(WorkerMain, nullptr, kWorkerStackSize,

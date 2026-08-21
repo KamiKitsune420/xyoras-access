@@ -31,16 +31,21 @@ The riskiest work, done first: prove on-console speech is viable.
 
 | # | Task | Status |
 | --- | --- | --- |
-| 1.1 | Link eSpeak into the plugin; synthesise to a PCM buffer | TODO |
+| 1.1 | Link eSpeak into the plugin; synthesise to a PCM buffer | DONE |
 | 1.2 | Wrap PCM16 in an in-memory BCWAV header | TODO |
 | 1.3 | Play it via CTRPF `Sound` / libcwav on CSND | TODO |
-| 1.4 | Speak a startup banner when the game boots | TODO |
-| 1.5 | Measure end-to-end latency on New 3DS and Old 3DS | TODO |
+| 1.4 | Speak a startup banner when the game boots | DONE (written to WAV; audible playback untested) |
+| 1.5 | Measure end-to-end latency on New 3DS and Old 3DS | TODO (17x realtime under emulation; needs hardware) |
 | 1.6 | Handle APT events (sleep, HOME suspend) correctly | TODO |
-| 1.7 | Synthesis worker thread + priority queue + interruption | TODO |
+| 1.7 | Synthesis worker thread + priority queue + interruption | DONE |
 
 **Exit criterion:** the plugin says an arbitrary sentence on demand, over game
 audio, in under 150 ms, without disturbing the game.
+
+Status: everything except the audio output itself is done and verified under
+emulation — eSpeak runs on ARM11, finds its data, and synthesises correct PCM
+at ~17x realtime. What remains is 1.2/1.3/1.6 (BCWAV + CSND + APT handling),
+which cannot be tested off-hardware because emulators stub CSND out entirely.
 
 If 1.5 fails badly on Old 3DS, apply the mitigations in
 `06-tts-audio-pipeline.md` before continuing — everything downstream depends on

@@ -7,6 +7,7 @@
  */
 #include "xyoras/common.hpp"
 #include "xyoras/game.hpp"
+#include "xyoras/platform.hpp"
 #include "xyoras/speech.hpp"
 
 #include <string>
@@ -14,6 +15,8 @@
 namespace xyoras { namespace diag {
     bool IsSelfTestRequested(void);
     void RunSelfTest(void);
+    void Checkpoint(const char *stage);
+    void ProbeFopen(const char *when);
 }}
 
 namespace CTRPluginFramework
@@ -148,6 +151,20 @@ namespace CTRPluginFramework
 
     int main(void)
     {
+        // Checkpoints go through CTRPF's File API and are written before
+        // anything else can fail. If this file appears at all, the plugin ran;
+        // how far the list gets says where it stopped. Without this there is no
+        // way to tell "CTRPF never started" from "CTRPF ran but could not write
+        // files", and those call for completely different fixes.
+        diag::Checkpoint("plugin main entered");
+
+        // MUST come before speech starts. stdio does not work in a game
+        // process until this runs, and eSpeak reads all its voice data through
+        // stdio -- without it, espeak_Initialize hangs rather than failing.
+        // See platform.cpp.
+        const bool sdmcOk = platform::MountSdmc();
+        diag::Checkpoint(sdmcOk ? "sdmc mounted" : "sdmc mount FAILED");
+
         PluginMenu *menu = new PluginMenu(
             "XYORAS Access", 0, 1, 0,
             "Accessibility for Pokemon Generation 6.\n"
@@ -160,11 +177,15 @@ namespace CTRPluginFramework
         // for a written report. This is the only way to see what happened on an
         // emulator, where CSND is stubbed and nothing can be heard.
         const bool selfTest = diag::IsSelfTestRequested();
+        diag::Checkpoint(selfTest ? "self test requested" : "no self test marker");
 
         // Speech comes up before the menu is populated so the status entry can
         // report honestly whether it started.
         speech::Init(selfTest ? speech::AudioBackend::WavDump
                               : speech::AudioBackend::Csnd);
+
+        diag::Checkpoint(speech::IsAvailable() ? "speech started"
+                                              : "speech FAILED to start");
 
         InitMenu(*menu);
 
@@ -172,6 +193,8 @@ namespace CTRPluginFramework
 
         if (selfTest)
             diag::RunSelfTest();
+
+        diag::Checkpoint("entering menu loop");
 
         menu->Run();
 

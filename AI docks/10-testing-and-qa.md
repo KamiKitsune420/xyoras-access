@@ -9,8 +9,14 @@ Luma3DS's custom SVC 0x80, which Azahar does not implement, and the plugin
 stops there. Even past that point, Azahar's CSND is entirely stubbed, so
 nothing would be audible.
 
-Both are missing emulation rather than bugs we can work around, so **every test
-of the actual plugin happens on real hardware**. This shapes the whole QA
+The `CustomBackdoor` gap turned out **not** to be fatal — with checkpoint
+instrumentation the plugin demonstrably runs under Azahar, including CTRPF,
+eSpeak, and file access. What the emulator genuinely cannot do is **play
+audio**, because CSND is stubbed, and it cannot be trusted for **timing**.
+
+So Azahar covers more than expected: use it to exercise startup, file access,
+synthesis, and the WAV backend. Only playback and performance **must** happen
+on real hardware. This shapes the whole QA
 approach: keep as much logic as possible testable off-target, and make
 on-target testing cheap to repeat.
 

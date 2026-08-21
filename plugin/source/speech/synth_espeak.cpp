@@ -9,8 +9,10 @@
  * this file happens on the synthesis worker thread and nowhere else.
  */
 #include "xyoras/speech.hpp"
+#include "xyoras/platform.hpp"
 
 #include <espeak-ng/speak_lib.h>
+#include <cstdio>
 #include <cstring>
 
 namespace xyoras { namespace speech {
@@ -55,6 +57,27 @@ namespace {
         return 0;
     }
 
+    /// The four files eSpeak cannot start without. Checking them ourselves
+    /// turns a hang into a clean, reportable failure.
+    bool VoiceDataPresent(void)
+    {
+        static const char *kRequired[] = {
+            "sdmc:/xyoras-access/espeak-ng-data/phondata",
+            "sdmc:/xyoras-access/espeak-ng-data/phontab",
+            "sdmc:/xyoras-access/espeak-ng-data/phonindex",
+            "sdmc:/xyoras-access/espeak-ng-data/en_dict",
+        };
+
+        for (size_t i = 0; i < sizeof(kRequired) / sizeof(kRequired[0]); ++i)
+        {
+            FILE *f = std::fopen(kRequired[i], "rb");
+            if (f == nullptr)
+                return false;
+            std::fclose(f);
+        }
+        return true;
+    }
+
     class EspeakSynth : public ISynth
     {
     public:
@@ -65,6 +88,27 @@ namespace {
             if (ready_)
                 return true;
 
+            // eSpeak does NOT fail cleanly when it cannot read its voice data:
+            // espeak_Initialize hangs, and since this runs on the plugin's own
+            // thread it takes the mod down silently. A blind player would get
+            // no banner and no way to find out why, which is the exact failure
+            // mode rule 5 in CLAUDE.md exists to prevent.
+            //
+            // So check the data is reachable BEFORE handing control to eSpeak.
+            if (!platform::IsSdmcMounted())
+            {
+                diag::Checkpoint("espeak: SD not mounted, refusing to initialise");
+                return false;
+            }
+
+            if (!VoiceDataPresent())
+            {
+                diag::Checkpoint("espeak: voice data missing, refusing to initialise");
+                return false;
+            }
+
+            diag::Checkpoint("espeak: calling espeak_Initialize");
+
             // AUDIO_OUTPUT_SYNCHRONOUS: eSpeak never touches an audio device.
             // It hands us PCM through the callback and we own playback.
             const int rate = espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS,
@@ -72,7 +116,12 @@ namespace {
                                                kDataPath,
                                                0 /* options */);
             if (rate <= 0)
+            {
+                diag::Checkpoint("espeak: espeak_Initialize FAILED (no voice data?)");
                 return false;
+            }
+
+            diag::Checkpoint("espeak: initialised, selecting voice");
 
             sampleRate_ = rate;
             espeak_SetSynthCallback(&SynthCallback);
@@ -87,6 +136,7 @@ namespace {
             SetRate(kDefaultRateWpm);
             SetPitch(kDefaultPitch);
 
+            diag::Checkpoint("espeak: ready");
             ready_ = true;
             return true;
         }
