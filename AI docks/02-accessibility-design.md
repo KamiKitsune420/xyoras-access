@@ -204,6 +204,25 @@ Related rules that follow from the same place:
 | Text that never leaves is not re-spoken | Otherwise a static label repeats forever |
 | Each source of text has its own tracker | A busy menu must not suppress a story line |
 | An explicit reset on context change | Entering a battle must not be silenced by identical earlier text |
+| The same words on two panes are spoken once | The language screen holds "Play Pokemon X in" twice, one per display line |
+
+### What the player actually hears
+
+Confirmed against Pokemon X in the emulator, and shaped by what came back.
+
+- **Only what changed is spoken.** Arriving at the language screen, the mod read
+  twelve panes and said nothing; as the screen changed it said "YES", "NO",
+  "English" — the three things that were new — and stayed quiet about the rest.
+- **Nothing is announced on arrival.** The first settled screen after a context
+  change is recorded silently, because reading every label on a screen that can
+  carry 155 of them would bury the player. Hearing a whole screen is what the
+  read-screen tap is for.
+- **The game's own inline text commands are stripped.** Real dialogue carries
+  engine markers mid-sentence. Their parameters were being read aloud as "?",
+  which eSpeak speaks as a question — turning statements into questions.
+- **Accented letters are folded, not dropped.** "Hungria" is much better than
+  "Hungra"; both are better than "Hungr, question mark, a".
+- **Padding is collapsed.** Layout text is full of it.
 
 ## Anti-patterns to avoid
 

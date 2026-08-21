@@ -75,8 +75,13 @@ callback. Constraints that shape our design:
 - The target instruction must not be PC-relative if we want automatic
   re-execution — position-dependent instructions must be handled manually.
 - The callback runs on **the game's thread**, in whatever context the game was
-  in. It must be short, must not allocate, and must not block. Ours will only
-  copy a string and push it onto a queue.
+  in. It must be short, must not allocate, and must not block.
+
+**The mod does not currently install any hooks.** This section is kept because
+the constraints still apply the day one is needed. Reading text — the thing
+hooks were meant for — is done by scanning the heap for `nw::lyt::TextBox`
+instead, which needs no code modification at all and is therefore both safer
+and version-independent in a way a hook is not.
 
 ## Process model
 
@@ -84,16 +89,18 @@ callback. Constraints that shape our design:
                  game threads
                       │
     ┌─────────────────┴─────────────────┐
-    │  Hook callbacks (game thread)     │   <- must be fast, non-blocking
-    │  • message render hook            │
-    │  • menu update hook               │
+    │  Frame callback (CTRPF)           │   <- game thread: must be trivial
+    │  • read controller, run the chord │
+    │    state machine                  │
+    │  • set a flag, return             │
     └─────────────────┬─────────────────┘
-                      │ push (lock-free-ish, mutex-guarded ring)
+                      │ set request flag (mutex, never held over slow work)
                       ▼
     ┌───────────────────────────────────┐
-    │  Frame callback (CTRPF)           │   <- polls state, reads hotkeys
-    │  • poll game state, diff it       │
-    │  • read controller chords         │
+    │  Narration thread                 │   <- reads the game, priority + 1
+    │  • scan heap for TextBox vptrs    │      (i.e. below the game's threads)
+    │  • read each pane's UTF-16 string │
+    │  • decide what changed            │
     └─────────────────┬─────────────────┘
                       │ enqueue Utterance
                       ▼
@@ -110,13 +117,28 @@ callback. Constraints that shape our design:
     └───────────────────────────────────┘
 ```
 
+There is **no render hook**. The message-render path was the original plan and
+turned out to be unnecessary: scanning the heap for `nw::lyt::TextBox` finds the
+text wherever it came from. See `12-research-log.md`.
+
 Rules this enforces:
 
-- **Nothing slow happens on a game thread.** Synthesis, file IO, and audio
-  submission all live on the worker.
+- **Nothing slow happens on a game thread.** Synthesis, file IO, audio
+  submission and *reading game memory* all live off it. Reading counts: a full
+  heap scan measured 551 ms on the game clock under emulation, and even a
+  routine poll reads every tracked pane.
+- **The frame callback only sets flags.** `RequestReadScreen()` and
+  `RequestNewContext()` take a mutex, set a bool, and return. The narration
+  thread owns everything else, so no lock is ever held across slow work.
 - **One queue, one policy.** Priority and interruption rules from
   `02-accessibility-design.md` are implemented in exactly one place.
 - **The worker can be killed and restarted** without taking the game down.
+
+### Why reading has its own thread rather than sharing the speech worker
+
+The speech worker blocks for as long as synthesis takes — hundreds of
+milliseconds for a long line. Polling on that thread would mean the mod stops
+watching the screen exactly while it is talking, and would miss the next line.
 
 ## Module layout
 
@@ -124,26 +146,21 @@ Rules this enforces:
 plugin/
   source/
     main.cpp              Entry points, lifecycle, menu construction
-    config.cpp            Settings load/save, defaults
+    platform.cpp          The things libctru does not give a plugin
+    diagnostics.cpp       Checkpoints, self-test report, narration trace
     game/
-      game_id.cpp         Title-ID + version detection, series dispatch
+      game_id.cpp         Title-ID + version detection, per-capability gate
       addresses.cpp       The address table (the ONLY place with literals)
       memory.cpp          Guarded read helpers, pointer-chain walking
-      pk6.cpp             PK6 decrypt, unshuffle, field accessors
-      state.cpp           Snapshot of watched values + change detection
-      hooks.cpp           Hook installation and callbacks
     speech/
       queue.cpp           Priority queue, interruption policy
       speaker.cpp         Worker thread; owns the synth + audio backends
       synth_espeak.cpp    eSpeak NG binding
       audio_cwav.cpp      PCM16 -> BCWAV -> CTRPF Sound / libcwav
-      phrases.cpp         Utterance construction (the words we actually say)
+      audio_wav.cpp       .wav files on the SD card, for emulators
     features/
-      overworld.cpp       Position, facing, scans, landmarks
-      battle.cpp          Battle narration
-      menus.cpp           Menu narration
-      readouts.cpp        Party, bag, box, Pokedex readouts
-      hotkeys.cpp         Chord detection and dispatch
+      narrate.cpp         The narration thread: scan, read, decide, speak
+      hotkeys.cpp         Reads the controller, dispatches chords
     data/
       names_species.cpp   Generated name tables
       names_moves.cpp
@@ -151,6 +168,21 @@ plugin/
       names_abilities.cpp
   include/xyoras/         Matching headers
 ```
+
+**Much of the logic lives in headers, not in `source/`.** `pk6.hpp`,
+`memchain.hpp`, `vtscan.hpp`, `textbox.hpp`, `screentext.hpp`, `narration.hpp`,
+`panecache.hpp`, `phrases.hpp` and `hotkeys.hpp` are header-only and free of
+anything 3DS-specific, with their readers injected. That is what lets the host
+tests drive the shipped code against a fake address space instead of a copy of
+it — see `10-testing-and-qa.md`. The `.cpp` files under `source/` are thin: they
+supply the real reader and the real threads.
+
+Still to come, and named here so they land in the right place:
+`config.cpp` (settings), `features/overworld.cpp`, `features/battle.cpp`,
+`features/menus.cpp`, `features/readouts.cpp`.
+
+There is no `hooks.cpp`. Hook installation was the plan until it turned out
+that no hook is needed.
 
 The dependency direction is strict and one-way:
 
@@ -194,6 +226,18 @@ Planned allocation (to be measured, see `11-roadmap.md`):
 
 Old 3DS has 128 MB total with far less free than New 3DS, so the Old-3DS
 budget is the binding constraint. Measure before assuming.
+
+**3gxtool accepts only `2MiB`, `5MiB` or `10MiB`.** Anything else is rejected
+with a warning and silently replaced by 5 MiB — which is what this plugin ran
+on through all emulator testing, because the field said `12MiB` and nobody read
+the warning. Speech worked at 5 MiB. It is now set to `10MiB` explicitly; if
+the game misbehaves on hardware, dropping back to 5 MiB is the first thing to
+try, and it is known to be enough.
+
+The narration thread adds a 32 KB stack and one 4 KB scan buffer. The buffer is
+a file-scope array rather than a stack local on purpose: 4 KB is too much to
+put on a 32 KB stack, and allocating it per scan inside a game process is worth
+avoiding.
 
 ## What libctru does NOT give a plugin
 

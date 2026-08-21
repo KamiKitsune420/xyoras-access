@@ -58,8 +58,8 @@ speech being usable.
 
 | # | Task | Status |
 | --- | --- | --- |
-| 2.1 | Title ID + update version detection, series dispatch | TODO |
-| 2.2 | Address table with verification metadata | TODO |
+| 2.1 | Title ID + update version detection, series dispatch | DONE |
+| 2.2 | Address table with per-capability verification metadata | DONE |
 | 2.3 | Guarded memory read helpers and pointer walking | DONE |
 | 2.4 | Re-verify inherited community offsets on target versions | TODO |
 | 2.5 | PK6 decrypt + unshuffle + field accessors | DONE (round-trip verified; not yet against real data) |
@@ -67,6 +67,27 @@ speech being usable.
 | 2.7 | Find player coordinates and map ID | TODO |
 | 2.8 | Read dialogue text | DONE via a different route: no render hook needed |
 | 2.9 | Find menu cursor state | TODO |
+| 2.10 | Wire text reading into the plugin and speak what changes | DONE (emulator only) |
+
+**2.2 became per-capability.** A single "are the offsets verified" flag was
+wrong, because the table is really two tables: the layout-text addresses this
+project confirmed, and the save/battle offsets inherited from the community
+that nobody has checked. One flag meant either keeping a working feature off or
+switching on unverified offsets. `game::IsVerified(Capability)` asks about each
+separately. `LayoutText` is verified for XY version 0; nothing else is verified
+for anything.
+
+**2.10 runs against the real game** — scan, read, choose, speak, traced against
+Pokemon X in the emulator. A full heap scan measured 551 ms on the game clock,
+so the cache learns where panes were last found and rescans that window in
+31 ms. Both numbers are emulated and neither transfers to hardware; the ratio
+does. See `12-research-log.md`.
+
+**2.4 is now the main thing standing between here and Phase 3.** Everything in
+Phase 3 that reads save-backed data — party, bag, position, map — depends on
+offsets that have never been confirmed, and `IsVerified(Capability::SaveData)`
+correctly refuses them. Confirming them needs a save with data in it; the one
+available is a fresh game with no Pokemon anywhere.
 
 **2.8 is solved, and not the way it was framed.** No render hook is needed at
 all. Gen 6 ships RTTI, so `nw::lyt::TextBox` can be found by scanning the heap
@@ -88,8 +109,8 @@ map, party contents, and the last message the game displayed.
 
 | # | Task | Status |
 | --- | --- | --- |
-| 3.1 | Dialogue narration (auto-speak message boxes) | TODO |
-| 3.2 | Repeat-last and message history | TODO |
+| 3.1 | Dialogue narration (auto-speak message boxes) | DONE (emulator only) |
+| 3.2 | Repeat-last and message history | PART (repeat-last done; no history) |
 | 3.3 | Position report and facing scan hotkeys | TODO |
 | 3.4 | Movement feedback ticks; blocked-step cue | TODO |
 | 3.5 | Map change announcements | TODO |

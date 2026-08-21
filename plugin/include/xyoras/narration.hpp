@@ -43,6 +43,19 @@ namespace xyoras { namespace narration {
         Observation(u32 i, const std::string &t) : id(i), text(t) {}
     };
 
+    /// Adds a string unless it is already there.
+    ///
+    /// Real screens carry the same words on more than one pane -- the language
+    /// screen in Pokemon X holds "Play Pokemon X in" twice, once per display
+    /// line. Saying it twice tells the player nothing and costs them time.
+    inline void AppendUnique(std::vector<std::string> &out, const std::string &text)
+    {
+        for (u32 i = 0; i < out.size(); ++i)
+            if (out[i] == text)
+                return;
+        out.push_back(text);
+    }
+
     /// Watches every text pane on screen and reports what is worth saying.
     class Narrator
     {
@@ -86,7 +99,7 @@ namespace xyoras { namespace narration {
                 {
                     settledSomething = true;
                     if (!baselinePending_)
-                        toSpeak.push_back(settled);
+                        AppendUnique(toSpeak, settled);
                 }
 
                 next[o.id] = t;
@@ -114,7 +127,7 @@ namespace xyoras { namespace narration {
             out.clear();
             for (u32 i = 0; i < observed.size(); ++i)
                 if (textbox::WorthSpeaking(observed[i].text))
-                    out.push_back(observed[i].text);
+                    AppendUnique(out, observed[i].text);
         }
 
         /// Forget everything and take the next poll as a fresh baseline.

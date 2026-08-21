@@ -231,6 +231,57 @@ namespace {
         Settle(n, Furniture(), spoken);
         test::Equal(spoken.size(), 0u, "so the first real screen is still silent");
     }
+    void TestDuplicatePanesSpeakOnce(void)
+    {
+        test::Section("the same words on two panes");
+
+        // Read out of the real language screen in Pokemon X, which holds
+        // "Play Pokemon X in" twice -- once per display line. Saying it twice
+        // tells the player nothing and costs them time.
+        narration::Narrator n;
+        std::vector<std::string> spoken;
+        Settle(n, Furniture(), spoken);
+
+        std::vector<Observation> obs = Furniture();
+        obs.push_back(Observation(0x08500000, "Play Pokemon X in"));
+        obs.push_back(Observation(0x08500100, "Play Pokemon X in"));
+
+        Settle(n, obs, spoken);
+        test::Equal(spoken.size(), 1u, "spoken once, not twice");
+        if (spoken.size() == 1)
+            test::EqualStr(spoken[0], "Play Pokemon X in", "and it is the right line");
+    }
+
+    void TestReadAllDeduplicates(void)
+    {
+        test::Section("read-screen with repeated text");
+
+        narration::Narrator n;
+        std::vector<Observation> obs = Furniture();
+        obs.push_back(Observation(0x08500000, "Play Pokemon X in"));
+        obs.push_back(Observation(0x08500100, "Play Pokemon X in"));
+
+        std::vector<std::string> all;
+        n.ReadAll(obs, all);
+        test::Equal(all.size(), 6u, "five labels plus one copy of the repeat");
+    }
+
+    void TestDistinctTextStillBothSpoken(void)
+    {
+        test::Section("two panes that differ");
+
+        // Deduplication must not silence a genuinely different line.
+        narration::Narrator n;
+        std::vector<std::string> spoken;
+        Settle(n, Furniture(), spoken);
+
+        std::vector<Observation> obs = Furniture();
+        obs.push_back(Observation(0x08500000, "Play Pokemon X in"));
+        obs.push_back(Observation(0x08500100, "Play Pokemon Y in"));
+
+        Settle(n, obs, spoken);
+        test::Equal(spoken.size(), 2u, "both are spoken");
+    }
 }
 
 int main(void)
@@ -247,6 +298,9 @@ int main(void)
     TestNewContextResets();
     TestReadAllIgnoresHistory();
     TestEmptyPollDoesNotWasteBaseline();
+    TestDuplicatePanesSpeakOnce();
+    TestReadAllDeduplicates();
+    TestDistinctTextStillBothSpoken();
 
     return test::Report("narration");
 }
