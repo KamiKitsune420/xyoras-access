@@ -73,6 +73,64 @@ scripts/package.sh            # produce dist/luma.zip for the SD card
 
 Full details in [`AI docks/07-build-environment.md`](AI%20docks/07-build-environment.md).
 
+## Testing it
+
+Three layers, in the order you should reach for them. Reasoning behind the
+split is in [`AI docks/10-testing-and-qa.md`](AI%20docks/10-testing-and-qa.md).
+
+### 1. Host tests — seconds, no console, no emulator
+
+```bash
+scripts/host-test.sh
+```
+
+Most of the mod's logic lives in header-only files with their memory reader
+injected, so these run the **shipped code** against a fake address space rather
+than a copy of it. Everything decidable this way is decided this way.
+
+### 2. Emulator — minutes, everything except the audio
+
+```bash
+scripts/run-emulator.sh 120      # run for 120 seconds and report
+scripts/play-speech.sh           # hear what it said
+```
+
+Set your paths once in `scripts/env.local.sh` (gitignored):
+
+```bash
+XYORAS_AZAHAR="/c/path/to/azahar.exe"
+XYORAS_ROM="/c/path/to/Pokemon X.3ds"
+XYORAS_AZAHAR_USER="/c/Users/<you>/AppData/Roaming/Azahar"
+```
+
+The run prints how far startup got, what text the mod read out of the game, and
+what it decided to say. It leaves three files behind on the virtual SD card:
+
+| File | What it answers |
+| --- | --- |
+| `checkpoints.txt` | How far startup got |
+| `diagnostics.txt` | What was detected; speech timings |
+| `narration.txt` | Every scan, what it read, what it chose to say |
+
+**You will not hear anything from the emulator itself.** No 3DS emulator
+implements CSND, and CSND is the only audio path a game plugin has — the game
+already owns the DSP. So the run diverts speech to `.wav` files and
+`play-speech.sh` plays them through the PC. That covers everything except the
+final hop onto real audio hardware.
+
+### 3. Hardware — the only authoritative layer
+
+```bash
+scripts/package.sh --first-boot   # includes the diagnostic marker files
+```
+
+Extract `dist/luma.zip` to the root of the SD card, merging with the existing
+`luma` folder, then enable the plugin loader in Rosalina (`L`+`Down`+`Select`).
+
+The first-boot sequence — ordered so the first thing that fails tells you where
+the problem is — is in
+[`AI docks/10-testing-and-qa.md`](AI%20docks/10-testing-and-qa.md).
+
 ## Design principles
 
 **Translation, not transformation.** The mod speaks information the game

@@ -248,8 +248,17 @@ void RunSelfTest(void)
 {
     Checkpoint("self test started");
 
-    // Highest priority so nothing can jump the queue ahead of it.
-    speech::Say(speech::Priority::Interrupt, kTestPhrase);
+    // Critical, NOT Interrupt. Interrupt does not merely refuse to be queued
+    // behind other things -- it cancels everything already pending, and the
+    // startup banner and the hotkey announcement are queued just before this
+    // runs. Using it here silently deleted the line that tells a first-time
+    // player how to read the screen, which is the one thing they cannot
+    // discover any other way.
+    //
+    // Critical still cannot be jumped by anything except a deliberate player
+    // request, so the test phrase is heard either way -- and a self-test run
+    // now exercises the real startup sequence rather than a truncated one.
+    speech::Say(speech::Priority::Critical, kTestPhrase);
 
     // The worker synthesises on its own thread; give it time to finish before
     // reading the stats. Generous, because this only runs when asked for.

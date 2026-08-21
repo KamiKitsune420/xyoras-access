@@ -1728,3 +1728,34 @@ snapshot again; whatever differs is what marks the selection.
 
 It does nothing without `/xyoras-access/trace-narration`, so it cannot surprise
 a player, and it hands the chord back when the position report needs it.
+
+---
+
+## 2026-08-21 — Listening to it, and a line that was being deleted
+
+Added `scripts/run-emulator.sh` and `scripts/play-speech.sh` so a run can be
+heard rather than only read. The emulator still cannot play anything — no 3DS
+emulator implements CSND — so the run diverts speech to `.wav` and the second
+script plays those through the PC.
+
+Playing them immediately turned up a bug that reading the trace never would
+have: **the startup sequence was two utterances, and it should have been
+three.**
+
+`RunSelfTest` spoke its test phrase at `Priority::Interrupt`, with the comment
+"highest priority so nothing can jump the queue ahead of it". But Interrupt does
+not mean "cannot be delayed" — it means **cancel everything already pending**.
+The startup banner and the hotkey announcement are queued immediately before the
+self-test runs, so the self-test was deleting the line that tells a first-time
+player how to read the screen. That line is the only way a blind player can
+discover the control, and it was being destroyed by the diagnostic meant to
+prove the mod works.
+
+Now `Priority::Critical`: still unjumpable by anything except a deliberate
+player request, and a self-test run exercises the real startup sequence instead
+of a truncated one. Three utterances, confirmed by listening.
+
+The wider point: the priority levels were being read as "how important is this"
+when `Interrupt` also carries "and destroy what is waiting". Anywhere else that
+reaches for `Interrupt` should be checked against that second meaning — it is
+correct for a player pressing a key, and wrong for anything automatic.
