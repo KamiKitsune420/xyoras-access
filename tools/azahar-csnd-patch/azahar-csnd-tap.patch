@@ -1,0 +1,178 @@
+diff --git a/src/core/hle/service/csnd/csnd_snd.cpp b/src/core/hle/service/csnd/csnd_snd.cpp
+index cfd367a..1da5d63 100644
+--- a/src/core/hle/service/csnd/csnd_snd.cpp
++++ b/src/core/hle/service/csnd/csnd_snd.cpp
+@@ -2,14 +2,64 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#include <cstring>
++#include <vector>
+ #include "common/alignment.h"
+ #include "common/archives.h"
++#include "common/file_util.h"
+ #include "core/core.h"
++#include "core/memory.h"
+ #include "core/hle/ipc_helpers.h"
+ #include "core/hle/kernel/resource_limit.h"
+ #include "core/hle/result.h"
+ #include "core/hle/service/csnd/csnd_snd.h"
+ 
++
++// ---------------------------------------------------------------------------
++// CSND audio tap  (added for XYORAS Access verification)
++//
++// Azahar tracks all CSND channel state but never renders it -- CommandId::Start
++// is a no-op, so CSND is silent. That makes the emulator useless for testing
++// anything that uses CSND, which is the only audio path available to 3GX game
++// plugins.
++//
++// This does not implement mixing. It writes the samples a channel WOULD play
++// to a .wav file when the channel is started, which is enough to verify that
++// the guest handed CSND correct audio at the correct rate.
++// ---------------------------------------------------------------------------
++namespace {
++
++void WriteWavFile(const std::string& path, const std::vector<s16>& pcm, u32 sample_rate) {
++    FileUtil::IOFile f(path, "wb");
++    if (!f.IsOpen()) {
++        return;
++    }
++
++    const u32 data_bytes = static_cast<u32>(pcm.size() * sizeof(s16));
++    const u32 byte_rate = sample_rate * 2;
++    u8 header[44];
++    std::memcpy(header + 0, "RIFF", 4);
++    const u32 riff_size = 36 + data_bytes;
++    std::memcpy(header + 4, &riff_size, 4);
++    std::memcpy(header + 8, "WAVEfmt ", 8);
++    const u32 fmt_size = 16;
++    std::memcpy(header + 16, &fmt_size, 4);
++    const u16 fmt_pcm = 1, channels_n = 1, block_align = 2, bits = 16;
++    std::memcpy(header + 20, &fmt_pcm, 2);
++    std::memcpy(header + 22, &channels_n, 2);
++    std::memcpy(header + 24, &sample_rate, 4);
++    std::memcpy(header + 28, &byte_rate, 4);
++    std::memcpy(header + 32, &block_align, 2);
++    std::memcpy(header + 34, &bits, 2);
++    std::memcpy(header + 36, "data", 4);
++    std::memcpy(header + 40, &data_bytes, 4);
++
++    f.WriteBytes(header, sizeof(header));
++    f.WriteBytes(pcm.data(), data_bytes);
++}
++
++} // Anonymous namespace
++
+ SERVICE_CONSTRUCT_IMPL(Service::CSND::CSND_SND)
+ SERIALIZE_EXPORT_IMPL(Service::CSND::CSND_SND)
+ 
+@@ -254,9 +304,16 @@ void CSND_SND::ExecuteCommands(Kernel::HLERequestContext& ctx) {
+         offset = command.next_command_offset;
+ 
+         switch (command.command_id) {
+-        case CommandId::Start:
+-            // TODO: start/stop the sound
++        case CommandId::Start: {
++            // Was: "// TODO: start/stop the sound" -- CSND never produced any
++            // audio. Rather than implement full mixing, capture what the
++            // channel would play so it can be inspected. See the tap above.
++            const u32 chan = command.start.channel;
++            if (command.start.value != 0 && chan < channels.size()) {
++                DumpChannelAudio(chan);
++            }
+             break;
++        }
+         case CommandId::Pause:
+             // TODO: pause/resume the sound
+             break;
+@@ -324,7 +381,11 @@ void CSND_SND::ExecuteCommands(Kernel::HLERequestContext& ctx) {
+             channel.block2_address = configure.block2_address;
+             channel.block1_size = channel.block2_size = configure.size;
+             if (configure.enable_playback) {
+-                // TODO: startthe sound
++                // Was: "// TODO: startthe sound". This is the combined
++                // configure-and-start command, and it is the one libcwav
++                // actually uses -- CommandId::Start is never issued, so
++                // patching that alone produced nothing.
++                DumpChannelAudio(configure.channel);
+             }
+             break;
+         }
+@@ -532,4 +593,61 @@ void InstallInterfaces(Core::System& system) {
+     std::make_shared<CSND_SND>(system)->InstallAsService(service_manager);
+ }
+ 
++void CSND_SND::DumpChannelAudio(u32 index) {
++    const Channel& c = channels[index];
++
++    if (c.block1_address == 0 || c.block1_size == 0) {
++        LOG_WARNING(Service_CSND, "channel {} started with no sample block", index);
++        return;
++    }
++
++    // block1_address is a PHYSICAL address -- CSND is a DMA engine and reads
++    // guest memory directly. This is exactly the pointer the guest supplied,
++    // so a bad VA->PA conversion on the guest side shows up here as garbage.
++    u8* src = system.Memory().GetPhysicalPointer(c.block1_address);
++    if (src == nullptr) {
++        LOG_ERROR(Service_CSND, "channel {} block1_address {:#010X} is unmapped", index,
++                  c.block1_address);
++        return;
++    }
++
++    std::vector<s16> pcm;
++    switch (c.encoding) {
++    case Encoding::Pcm16:
++        pcm.resize(c.block1_size / sizeof(s16));
++        std::memcpy(pcm.data(), src, pcm.size() * sizeof(s16));
++        break;
++    case Encoding::Pcm8:
++        pcm.resize(c.block1_size);
++        for (std::size_t i = 0; i < pcm.size(); ++i) {
++            pcm[i] = static_cast<s16>(static_cast<s8>(src[i])) << 8;
++        }
++        break;
++    default:
++        LOG_WARNING(Service_CSND, "channel {} uses encoding {} which the tap does not decode",
++                    index, static_cast<u32>(c.encoding));
++        return;
++    }
++
++    static u32 dump_counter = 0;
++    const std::string path =
++        FileUtil::GetUserPath(FileUtil::UserPath::UserDir) +
++        "csnd_dump_" + std::to_string(dump_counter++) + ".wav";
++
++    // CSND's "sample rate" field is not Hz -- it is a timer divider, and the
++    // hardware derives the rate from it. Writing the raw divider into a WAV
++    // header produces a file that plays at roughly a seventh of the intended
++    // speed, which looks alarming and is purely cosmetic.
++    const u32 hz = (c.sample_rate != 0) ? (0x03FEC3FCu / c.sample_rate) : 0;
++
++    WriteWavFile(path, pcm, hz);
++
++    LOG_INFO(Service_CSND,
++             "CSND TAP: channel={} paddr={:#010X} bytes={} samples={} rate={} "
++             "encoding={} volL={} volR={} loop={} -> {}",
++             index, c.block1_address, c.block1_size, pcm.size(), hz,
++             static_cast<u32>(c.encoding), c.left_channel_volume, c.right_channel_volume,
++             static_cast<u32>(c.loop_mode), path);
++}
++
+ } // namespace Service::CSND
+diff --git a/src/core/hle/service/csnd/csnd_snd.h b/src/core/hle/service/csnd/csnd_snd.h
+index 2cfbcf8..04f6a48 100644
+--- a/src/core/hle/service/csnd/csnd_snd.h
++++ b/src/core/hle/service/csnd/csnd_snd.h
+@@ -238,6 +238,10 @@ private:
+      */
+     void Reset(Kernel::HLERequestContext& ctx);
+ 
++    /// Writes what a channel would play to a .wav file. Added so CSND, which
++    /// Azahar tracks but never renders, can be verified. See csnd_snd.cpp.
++    void DumpChannelAudio(u32 index);
++
+     Core::System& system;
+ 
+     std::shared_ptr<Kernel::Mutex> mutex = nullptr;

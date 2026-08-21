@@ -767,3 +767,75 @@ Everything that can be checked without either a console or a patched emulator
 has now been checked. The remaining risk is confined to the mixer itself --
 whether correct samples at a correct address, at a correct rate, produce the
 expected sound.
+
+---
+
+## 2026-08-21 — CSND output verified: byte-for-byte identical
+
+**Goal:** verify the one remaining link -- that the audio reaching CSND is the
+audio eSpeak produced. No emulator implements CSND output, so this meant
+writing it.
+
+**Method:** built Azahar from source (GPL-2.0) with a patch that captures what
+a CSND channel would play. Patch and full notes in
+`tools/azahar-csnd-patch/`.
+
+### Result
+
+```
+CSND tap (what the hardware would receive)
+  samples  71473   RMS 3261   peak 29427   voiced 57%
+plugin dump (what eSpeak produced)
+  samples  71473   RMS 3261   peak 29427   voiced 57%
+
+comparing tap vs reference
+  IDENTICAL across all 71473 samples
+```
+
+Reproduced twice: once against a reference captured in an earlier session, and
+again against one captured from the same build under identical conditions.
+
+The physical address also matches from both ends independently -- the plugin
+reported handing over `0x22B48088`, and the emulator reports receiving
+`0x22B48088`.
+
+**This closes the chain.** PCM -> BCWAV -> linear allocation -> cache flush ->
+VA->PA conversion -> libcwav -> CSND preserves the audio exactly. The only
+thing now unverified is the DAC itself.
+
+### Three findings worth keeping
+
+**1. Azahar has no SDL frontend.** `citra_cli` is argument parsing only, and
+`citra_meta/main.cpp` carries `#error "citra_meta is somehow building with no
+frontend. This should be impossible!"`. Qt is mandatory. It is not a real
+obstacle -- `USE_SYSTEM_QT=OFF` makes CMake download Qt 6.10.3 itself -- but a
+Qt-free build cannot work, and discovering that after a long compile is
+avoidable.
+
+**2. libcwav never issues `CommandId::Start`.** It uses `ConfigureChannel`
+(0x00E), the combined configure-and-start command, whose `enable_playback`
+branch has its own separate TODO. The first version of the patch changed only
+`Start`, compiled cleanly, ran, and produced nothing at all. Two TODOs, and the
+obvious one is the wrong one.
+
+**3. CSND's `sample_rate` is a timer divider, not Hz.** The hardware computes
+the rate as `0x03FEC3FC / divider`. Our 22050 Hz audio reports `3039`
+(`0x03FEC3FC / 22050 = 3039`). This briefly looked like a serious bug in our
+own code; it was neither a bug nor ours.
+
+### A side observation: interruption demonstrably works
+
+The second utterance came out a different length on every run -- 128199,
+133471, 135695 samples. That is not nondeterminism in eSpeak. Startup queues
+three utterances (banner, untested-version warning, self-test phrase) and the
+self-test's `Interrupt` cancels synthesis mid-utterance, so the warning is
+truncated wherever the worker happened to be. Unplanned, but it is direct
+evidence that cancellation reaches into an in-progress synthesis rather than
+merely dropping queued items.
+
+### Cost
+
+About two hours: ~1.5 GB clone, Qt auto-download, ~2100 objects. Two false
+starts (Qt-free build, wrong TODO) plus repeated loss of the build when its
+launching shell was killed -- fixed by launching detached so the build outlives
+the process that started it.
