@@ -921,3 +921,55 @@ chat window, not the field message box.
 **Next:** CROs carry export tables and Azahar already parses them
 (`CROHelper::ApplyModuleExport`). If those exports are named, they may identify
 the message entry point directly. That is the thread to pull.
+
+---
+
+## 2026-08-21 — CRO exports are a dead end; save validation inconclusive
+
+### CRO export tables carry no useful names
+
+Patched Azahar to dump every CRO's named exports at load
+(`XYORAS_DUMP_EXPORTS`), hoping module exports would identify the message
+entry point. They do not:
+
+```
+# module DllLangSelect base 0X006A5000 exports 1
+DllLangSelect   nnroControlObject_   0X006A6C1C
+```
+
+**One export per module, and it is the SDK's module control object.** Game
+Freak exports no named functions, so the export table cannot lead us to
+anything. Route closed.
+
+Also learned: only `DllLangSelect` is loaded at the title screen. Reaching
+`DllDialogCommon` or `DllField` requires progressing into the game, which needs
+driving input the emulator does not expose to us. Any CRO work therefore starts
+from static analysis of the module files in RomFS, not from a running game.
+
+### Validating PK6 against the save: no Pokemon to validate against
+
+`tools/inspect_save.cpp` runs the shipped PK6 code over a real save. Round-trip
+tests prove self-consistency, but self-consistency is exactly what a subtly
+wrong algorithm also has, so a real-data check was worth building.
+
+The available save turns out to be from a freshly-started game:
+
+- Party at `0x14200`: six empty slots.
+- A scan of **every 4-byte-aligned offset** in the whole 0x65600 file found
+  **zero** valid PK6 structures. A decrypted PK6 authenticates itself through
+  its checksum, so this search does not depend on knowing the layout.
+
+So the result is inconclusive rather than negative -- there is nothing in the
+file to decrypt.
+
+**What it did confirm:** the save is genuine and structurally as documented.
+It is 51% non-zero, and the box-name block sits at `0x04400` with a stride of
+exactly `0x22` bytes, matching PKHeX's `BoxLayout6`. Our reading of the save
+format is correct; only the Pokemon are missing.
+
+`inspect_save` is kept. It is the fastest way to validate PK6 against reality
+the moment a save with Pokemon exists, and it needs no console.
+
+**Standing gap:** PK6 remains verified by round-trip and by conformance to
+PKHeX's documented algorithm, not against real encrypted data. Worth closing
+when possible.
