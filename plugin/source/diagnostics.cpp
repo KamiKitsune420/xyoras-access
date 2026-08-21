@@ -51,6 +51,8 @@ namespace {
     const char *kMarkerPath     = "/xyoras-access/dump-audio";
     const char *kReportPath     = "/xyoras-access/diagnostics.txt";
     const char *kCheckpointPath = "/xyoras-access/checkpoints.txt";
+    const char *kTracePath      = "/xyoras-access/narration.txt";
+    const char *kTraceMarker    = "/xyoras-access/trace-narration";
     const char *kFopenTestPath  = "sdmc:/xyoras-access/fopen-test.txt";
 
     /// A test phrase with digits and punctuation, so a broken dictionary or
@@ -107,6 +109,29 @@ void Checkpoint(const char *stage)
     Append(kCheckpointPath, std::string("reached: ") + stage);
 }
 
+/// Checked once and remembered. The narration thread asks before every line
+/// it writes, and hitting the filesystem 60 times a second to ask the same
+/// question would cost more than the tracing does.
+bool IsNarrationTraceRequested(void)
+{
+    static bool checked = false;
+    static bool enabled = false;
+
+    if (!checked)
+    {
+        checked = true;
+        enabled = File::Exists(kTraceMarker) == 1;
+    }
+    return enabled;
+}
+
+void NarrationTrace(const std::string &line)
+{
+    if (!IsNarrationTraceRequested())
+        return;
+    Append(kTracePath, line);
+}
+
 bool IsWavDumpRequested(void)
 {
     return File::Exists(kMarkerPath) == 1;
@@ -149,8 +174,15 @@ void WriteReport(void)
     r += (game::CurrentSeries() == game::Series::XY)   ? "XY\n"
        : (game::CurrentSeries() == game::Series::ORAS) ? "ORAS\n" : "unknown\n";
     r += "  update version : " + std::to_string(game::CurrentVersion()) + "\n";
-    r += "  offsets valid  : ";
-    r += game::IsVersionSupported() ? "yes\n" : "no (untested version)\n";
+    r += "  screen text    : ";
+    r += game::IsVerified(game::Capability::LayoutText)
+             ? "verified\n" : "NOT verified for this version\n";
+    r += "  save offsets   : ";
+    r += game::IsVerified(game::Capability::SaveData)
+             ? "verified\n" : "NOT verified\n";
+    r += "  battle offsets : ";
+    r += game::IsVerified(game::Capability::BattleState)
+             ? "verified\n" : "NOT verified\n";
     r += "\n";
 
     const speech::SynthStats st = speech::LastSynthStats();

@@ -188,7 +188,7 @@ namespace {
 
         std::string out;
         textbox::ReadString(Read32, Read16, &m, kObject, out);
-        test::EqualStr(out, "Hungr?a", "an accented character becomes '?', not silence");
+        test::EqualStr(out, "Hungria", "an accented letter folds to its base letter");
     }
 
     void TestRunawayString(void)
@@ -226,6 +226,84 @@ namespace {
         test::Check(textbox::WorthSpeaking("Hungr?a"),
                     "but one bad character in a real word is fine");
     }
+    void TestGameTextCommands(void)
+    {
+        test::Section("the game's inline text commands");
+
+        // Read verbatim out of a running Pokemon X: the language prompt has
+        // command runs mid-sentence, and leading padding. Before these were
+        // stripped the player heard stray question marks, which eSpeak speaks
+        // as a question -- changing the intonation of a plain statement.
+        FakeMemory m;
+        m.PutTextBox(kObject, kText);
+        const u16 prompt[] = {
+            ' ', ' ', 'S', 'e', 't', '?',
+            0x0010, 0x0002, 0x00E9, 0x0001,     // an inline command run
+            'O', 'n', 'c', 'e', ' ', 's', 'e', 't', '.',
+            0x0010, 0x0002, 0x00E9,
+            0
+        };
+        for (u32 i = 0; i < sizeof(prompt) / sizeof(u16); ++i)
+            m.halves[kText + i * 2] = prompt[i];
+
+        std::string out;
+        textbox::ReadString(Read32, Read16, &m, kObject, out);
+        test::EqualStr(out, "Set?Once set.", "commands stripped, padding trimmed");
+    }
+
+    void TestTypographicPunctuation(void)
+    {
+        test::Section("curly quotes and dashes");
+
+        // The script uses these throughout. As '?' they were audible noise.
+        FakeMemory m;
+        m.PutTextBox(kObject, kText);
+        const u16 quoted[] = {
+            0x201C, 'H', 'i', 0x201D, ' ', 0x2014, ' ',
+            'i', 't', 0x2019, 's', ' ', 'o', 'k', 0x2026, 0
+        };
+        for (u32 i = 0; i < sizeof(quoted) / sizeof(u16); ++i)
+            m.halves[kText + i * 2] = quoted[i];
+
+        std::string out;
+        textbox::ReadString(Read32, Read16, &m, kObject, out);
+        test::EqualStr(out, "\"Hi\" - it's ok...", "folded to ASCII equivalents");
+    }
+
+    void TestPaddingOnly(void)
+    {
+        test::Section("a pane holding only padding");
+
+        // Layout panes reserved but unused are full of spaces. Collapsing has
+        // to leave them empty so they are never spoken.
+        FakeMemory m;
+        m.PutTextBox(kObject, kText);
+        const u16 spaces[] = {' ', ' ', ' ', 0x0010, 0x0001, ' ', 0};
+        for (u32 i = 0; i < sizeof(spaces) / sizeof(u16); ++i)
+            m.halves[kText + i * 2] = spaces[i];
+
+        std::string out;
+        const bool ok = textbox::ReadString(Read32, Read16, &m, kObject, out);
+        test::Check(!ok, "reads as empty");
+        test::EqualStr(out, "", "and yields nothing");
+    }
+
+    void TestUnknownGlyphsDropped(void)
+    {
+        test::Section("glyphs we cannot speak");
+
+        // Button icons live in the private use area. Dropping them beats
+        // reading them as question marks.
+        FakeMemory m;
+        m.PutTextBox(kObject, kText);
+        const u16 withIcon[] = {'P', 'r', 'e', 's', 's', ' ', 0xE000, ' ', 'n', 'o', 'w', 0};
+        for (u32 i = 0; i < sizeof(withIcon) / sizeof(u16); ++i)
+            m.halves[kText + i * 2] = withIcon[i];
+
+        std::string out;
+        textbox::ReadString(Read32, Read16, &m, kObject, out);
+        test::EqualStr(out, "Press now", "the icon is dropped and the gap closed");
+    }
 }
 
 int main(void)
@@ -239,6 +317,10 @@ int main(void)
     TestTerminators();
     TestLineBreaks();
     TestNonAscii();
+    TestGameTextCommands();
+    TestTypographicPunctuation();
+    TestPaddingOnly();
+    TestUnknownGlyphsDropped();
     TestRunawayString();
     TestWorthSpeaking();
 

@@ -44,14 +44,141 @@ namespace xyoras { namespace textbox {
     /// there is one place that touches game memory.
     typedef bool (*Read16Fn)(u32 address, u16 &out, void *ctx);
 
+    /// True for a code unit eSpeak can be handed directly.
+    inline bool IsPlainAscii(u16 ch)
+    {
+        return ch >= 0x20 && ch < 0x7F;
+    }
+
+    /// Folds one UTF-16 code unit into ASCII, appending nothing if it should
+    /// be dropped.
+    ///
+    /// Three kinds of thing arrive here that are not letters:
+    ///
+    /// - **The game's own inline text commands.** Real text read out of
+    ///   Pokemon X contains runs like `0x10 0x02 0x00E9 0x01` in the middle of
+    ///   a sentence -- markers the engine uses for pauses, colour changes and
+    ///   substitutions. See `inCommand` below for how they are skipped.
+    /// - **Typographic punctuation.** Curly quotes, dashes and ellipses are
+    ///   everywhere in this game's script. Folded to their ASCII equivalents.
+    /// - **Accented letters.** Place and species names carry them. Folded to
+    ///   the base letter, which eSpeak pronounces close enough, rather than
+    ///   dropped -- "Hungria" is far better than "Hungra".
+    ///
+    /// Anything left over is dropped rather than replaced with '?'. A '?' is
+    /// not silent: eSpeak reads it as a question, changing the intonation of a
+    /// sentence that was never a question.
+    ///
+    /// `inCommand` carries the one piece of state this needs across units. A
+    /// control code starts a command, and everything after it that is not
+    /// plain ASCII is taken to be its parameters and dropped; the first plain
+    /// ASCII character ends it. That rule was chosen because it fits what the
+    /// game actually produced -- the `0x00E9` above is a parameter, and
+    /// folding it to "e" put a stray letter into the middle of a sentence --
+    /// while being unable to swallow real text, which is always plain ASCII in
+    /// an English script. It is a heuristic, not a decoder: the command format
+    /// is not documented here, and decoding it properly is the real fix.
+    inline void AppendFolded(u16 ch, bool &inCommand, std::string &out)
+    {
+        // Line breaks are layout, not speech. A space keeps words from running
+        // together without inventing a pause. Runs are collapsed later.
+        if (ch == 0x000A || ch == 0x000D || ch == 0x0009)
+        {
+            out.push_back(' ');
+            return;
+        }
+
+        if (ch < 0x20)
+        {
+            inCommand = true;   // a command marker, and its parameters follow
+            return;
+        }
+
+        if (inCommand)
+        {
+            if (!IsPlainAscii(ch))
+                return;         // still inside the command's parameters
+            inCommand = false;  // real text resumes
+        }
+
+        if (ch < 0x80)
+        {
+            out.push_back(static_cast<char>(ch));
+            return;
+        }
+
+        switch (ch)
+        {
+            case 0x00A0: out.push_back(' ');  return;   // non-breaking space
+            case 0x2018:                                 // left single quote
+            case 0x2019: out.push_back('\''); return;   // right single quote
+            case 0x201C:                                 // left double quote
+            case 0x201D: out.push_back('"');  return;   // right double quote
+            case 0x2010:
+            case 0x2011:
+            case 0x2012:
+            case 0x2013:                                 // en dash
+            case 0x2014: out.push_back('-');  return;   // em dash
+            case 0x2026: out += "...";        return;   // ellipsis
+            case 0x00D7: out.push_back('x');  return;   // multiplication sign
+            default: break;
+        }
+
+        // Latin-1 letters, folded to their base. The table covers 0xC0-0xFF,
+        // which is every accented letter these games use in a Western script.
+        if (ch >= 0x00C0 && ch <= 0x00FF)
+        {
+            static const char kLatin1[] =
+                "AAAAAAACEEEEIIII"      // C0-CF
+                "DNOOOOO.OUUUUY.s"      // D0-DF  (0xD7 handled above, 0xDF -> s)
+                "aaaaaaaceeeeiiii"      // E0-EF
+                "dnooooo.ouuuuy.y";     // F0-FF
+            const char folded = kLatin1[ch - 0x00C0];
+            if (folded != '.')
+                out.push_back(folded);
+            return;
+        }
+
+        // Everything else -- button glyphs, other scripts -- is dropped.
+        // Saying nothing is better than saying the wrong thing.
+    }
+
+    /// Collapses runs of spaces and trims the ends.
+    ///
+    /// Layout text is full of padding: the language prompt read out of a
+    /// running game began with two spaces and had a double space mid-sentence
+    /// where a command had been stripped. eSpeak does not care about extra
+    /// spaces, but the trace log and any text comparison do -- and a string
+    /// that is nothing but padding must come out empty so it is never spoken.
+    inline void CollapseSpaces(std::string &s)
+    {
+        std::string out;
+        out.reserve(s.size());
+
+        bool pendingSpace = false;
+        for (u32 i = 0; i < s.size(); ++i)
+        {
+            if (s[i] == ' ')
+            {
+                pendingSpace = !out.empty();   // never leading
+                continue;
+            }
+            if (pendingSpace)
+            {
+                out.push_back(' ');
+                pendingSpace = false;
+            }
+            out.push_back(s[i]);
+        }
+
+        s.swap(out);
+    }
+
     /// Reads the UTF-16 string a TextBox points at.
     ///
     /// Returns false when the object holds no string, which is normal: plenty
-    /// of panes are laid out but empty.
-    ///
-    /// Non-ASCII becomes '?'. eSpeak is fed ASCII, and a stray high codepoint
-    /// is spoken as noise rather than skipped. Proper transcoding arrives with
-    /// multi-language support.
+    /// of panes are laid out but empty. Also false when everything in it was
+    /// dropped as non-speech, which is the same thing as far as callers care.
     inline bool ReadString(mem::Read32Fn read32, Read16Fn read16, void *ctx,
                            u32 object, std::string &out)
     {
@@ -70,6 +197,7 @@ namespace xyoras { namespace textbox {
             return false;
 
         out.reserve(64);
+        bool inCommand = false;
         for (u32 i = 0; i < kMaxChars; ++i)
         {
             u16 ch = 0;
@@ -84,17 +212,10 @@ namespace xyoras { namespace textbox {
             if (ch == 0xFFFF)
                 break;
 
-            if (ch == 0x000A || ch == 0x000D)
-            {
-                // Line breaks are layout, not speech. A space keeps words from
-                // running together without inventing a pause.
-                out.push_back(' ');
-                continue;
-            }
-
-            out.push_back(ch < 0x80 ? static_cast<char>(ch) : '?');
+            AppendFolded(ch, inCommand, out);
         }
 
+        CollapseSpaces(out);
         return !out.empty();
     }
 

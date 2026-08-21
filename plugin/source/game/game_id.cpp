@@ -15,13 +15,34 @@ namespace {
     u16    g_version = 0;
     bool   g_identified = false;
 
-    /// Update versions our address table has been checked against.
+    // Verified update versions, per capability. Each list is what THIS project
+    // has actually confirmed against a running game -- not what someone else
+    // reported, and not what seems likely.
+
+    /// nw::lyt::TextBox discovery and its +0xD4 string offset.
     ///
-    /// Empty until Phase 2 re-verifies the inherited community offsets on real
-    /// hardware (see "AI docks/11-roadmap.md" task 2.4). Until then every
-    /// version reads as unsupported, which is the honest answer.
-    const u16 kVerifiedXY[]   = { };
-    const u16 kVerifiedORAS[] = { };
+    /// Version 0 is the base cartridge with no update installed. Confirmed by
+    /// reading real displayed text out of a running Pokemon X -- "Your name?",
+    /// "SAVE", "OPTIONS" and message-box content -- with the live instance
+    /// count tracking the screen exactly. See "AI docks/12-research-log.md".
+    ///
+    /// That confirmation was made under emulation. It holds anyway: these
+    /// addresses are in code.bin, which is the same file and the same fixed
+    /// base on hardware. What emulation cannot vouch for is timing and audio,
+    /// neither of which this capability depends on.
+    ///
+    /// An update changes code.bin, so a newer version is NOT covered.
+    const u16 kLayoutTextXY[]   = { 0 };
+    const u16 kLayoutTextORAS[] = { };
+
+    /// Trainer block, bag, boxes, Pokedex. Inherited from the community Gen 6
+    /// plugin lineage and never confirmed by this project on any version.
+    const u16 kSaveDataXY[]   = { };
+    const u16 kSaveDataORAS[] = { };
+
+    /// Battle slots and state. Same provenance, same status.
+    const u16 kBattleStateXY[]   = { };
+    const u16 kBattleStateORAS[] = { };
 
     bool Contains(const u16 *list, u32 count, u16 value)
     {
@@ -68,17 +89,57 @@ const char *TitleName(void)
     }
 }
 
-bool IsVersionSupported(void)
+bool IsVerified(Capability capability)
 {
-    switch (g_series)
+    const u16 *list  = nullptr;
+    u32        count = 0;
+
+    switch (capability)
     {
-        case Series::XY:
-            return Contains(kVerifiedXY, sizeof(kVerifiedXY) / sizeof(u16), g_version);
-        case Series::ORAS:
-            return Contains(kVerifiedORAS, sizeof(kVerifiedORAS) / sizeof(u16), g_version);
-        default:
-            return false;
+        case Capability::LayoutText:
+            if (g_series == Series::XY)
+            {
+                list  = kLayoutTextXY;
+                count = sizeof(kLayoutTextXY) / sizeof(u16);
+            }
+            else if (g_series == Series::ORAS)
+            {
+                list  = kLayoutTextORAS;
+                count = sizeof(kLayoutTextORAS) / sizeof(u16);
+            }
+            break;
+
+        case Capability::SaveData:
+            if (g_series == Series::XY)
+            {
+                list  = kSaveDataXY;
+                count = sizeof(kSaveDataXY) / sizeof(u16);
+            }
+            else if (g_series == Series::ORAS)
+            {
+                list  = kSaveDataORAS;
+                count = sizeof(kSaveDataORAS) / sizeof(u16);
+            }
+            break;
+
+        case Capability::BattleState:
+            if (g_series == Series::XY)
+            {
+                list  = kBattleStateXY;
+                count = sizeof(kBattleStateXY) / sizeof(u16);
+            }
+            else if (g_series == Series::ORAS)
+            {
+                list  = kBattleStateORAS;
+                count = sizeof(kBattleStateORAS) / sizeof(u16);
+            }
+            break;
     }
+
+    if (list == nullptr || count == 0)
+        return false;   // unknown series, or nothing verified for it
+
+    return Contains(list, count, g_version);
 }
 
 u32 Addr(const AddrPair &pair)

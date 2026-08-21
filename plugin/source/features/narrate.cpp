@@ -27,6 +27,7 @@
  */
 #include "xyoras/common.hpp"
 #include "xyoras/addresses.hpp"
+#include "xyoras/diagnostics.hpp"
 #include "xyoras/game.hpp"
 #include "xyoras/narrate.hpp"
 #include "xyoras/narration.hpp"
@@ -99,20 +100,39 @@ namespace {
     /// a game process is worth avoiding.
     u32 g_scanBuffer[vtscan::kPageSize / 4];
 
+    /// The ARM11 system tick runs at 268.111856 MHz. Dividing by 268111 gives
+    /// milliseconds closely enough for a cost that is being measured in tens
+    /// of them.
+    u32 TicksToMs(u64 ticks)
+    {
+        return static_cast<u32>(ticks / 268111ull);
+    }
+
     /// Full heap scan for text panes. Deliberately rare -- see panecache.hpp.
     void Rescan(void)
     {
+        const u64 startTick = svcGetSystemTick();
+
         const u32 vtable = game::Addr(game::addr::kVtTextBox);
         if (vtable == 0)
         {
             // No verified address for this series. Stay quiet.
-            g_cache.SetPanes(std::vector<u32>());
+            g_cache.SetPanes(std::vector<u32>(), false);
             return;
         }
 
+        // Scan only where panes were last found, when that is known. A full
+        // scan was measured at 551 ms under emulation, which is far too much
+        // to spend once a second; the window is typically a tiny fraction of
+        // the heap. Every tenth scan goes wide anyway so panes allocated
+        // outside the window are not missed forever.
+        u32 start    = game::kHeapMin;
+        u32 end      = game::kHeapMax;
+        const bool narrowed = g_cache.NarrowScanRange(start, end);
+
         std::vector<u32> hits(kMaxPanes, 0);
         const u32 found = vtscan::FindObjectsBlockwise(
-            ReadBlock, nullptr, game::kHeapMin, game::kHeapMax, vtable,
+            ReadBlock, nullptr, start, end, vtable,
             &hits[0], kMaxPanes, g_scanBuffer, vtscan::kPageSize / 4);
 
         // FindObjects reports the true total even when it wrote fewer, which
@@ -120,12 +140,24 @@ namespace {
         // about whether the vtable address is right.
         if (found == 0 || found >= kImplausiblePaneCount)
         {
-            g_cache.SetPanes(std::vector<u32>());
+            diag::NarrationTrace("scan: " + std::to_string(found) +
+                                 " hits -- rejected, cache cleared, " +
+                                 std::to_string(TicksToMs(svcGetSystemTick() - startTick)) +
+                                 " ms");
+            g_cache.SetPanes(std::vector<u32>(), narrowed);
             return;
         }
 
         hits.resize(found < kMaxPanes ? found : kMaxPanes);
-        g_cache.SetPanes(hits);
+        diag::NarrationTrace("scan: " + std::to_string(found) + " panes found" +
+                             (found > kMaxPanes
+                                  ? ", tracking " + std::to_string(kMaxPanes)
+                                  : "") +
+                             (narrowed ? " (narrow)" : " (full heap)") +
+                             " in " +
+                             std::to_string(TicksToMs(svcGetSystemTick() - startTick)) +
+                             " ms");
+        g_cache.SetPanes(hits, narrowed);
     }
 
     /// Read every cached pane. Shared by the automatic poll and the
@@ -157,9 +189,17 @@ namespace {
 
         if (all.empty())
         {
+            diag::NarrationTrace("read screen: nothing worth speaking out of " +
+                                 std::to_string(observed.size()) + " panes read");
             speech::Say(speech::Priority::Interrupt, "Nothing to read.");
             return;
         }
+
+        diag::NarrationTrace("read screen: " + std::to_string(all.size()) +
+                             " of " + std::to_string(observed.size()) +
+                             " panes worth speaking");
+        for (u32 i = 0; i < all.size(); ++i)
+            diag::NarrationTrace("  | " + all[i]);
 
         // The first line cancels whatever was queued, since the player has
         // just asked for something else; the rest follow it in order.
@@ -201,11 +241,28 @@ namespace {
             return;
         }
 
+        const bool wasBaseline = g_narrator.BaselinePending();
+
         std::vector<std::string> toSpeak;
         g_narrator.Poll(observed, toSpeak);
 
+        // The baseline poll is silent by design, which makes it the one moment
+        // where nothing in the trace says what the mod is actually seeing. Log
+        // it: "what does it read on this screen" is the first question anyone
+        // asks when a screen does not get spoken.
+        if (wasBaseline && !g_narrator.BaselinePending())
+        {
+            diag::NarrationTrace("baseline: " + std::to_string(observed.size()) +
+                                 " panes read");
+            for (u32 i = 0; i < observed.size(); ++i)
+                diag::NarrationTrace("  . " + observed[i].text);
+        }
+
         for (u32 i = 0; i < toSpeak.size(); ++i)
+        {
+            diag::NarrationTrace("say: " + toSpeak[i]);
             speech::Say(speech::Priority::Dialogue, toSpeak[i]);
+        }
     }
 
     bool ShouldKeepRunning(void)
@@ -254,7 +311,7 @@ bool Start(void)
 
     // Reading game memory is meaningless if the offsets belong to a build we
     // have not verified against. Silence beats confident nonsense.
-    if (!game::IsVersionSupported())
+    if (!game::IsVerified(game::Capability::LayoutText))
         return false;
 
     // And there is no point starting if we have no address for this series.
@@ -265,6 +322,10 @@ bool Start(void)
         Lock lock(g_lock);
         g_running = true;
     }
+
+    diag::NarrationTrace("--- narration starting, TextBox vtable " +
+                         std::to_string(game::Addr(game::addr::kVtTextBox)) +
+                         " ---");
 
     g_thread = threadCreate(ThreadMain, nullptr, kThreadStackSize,
                             PollThreadPriority(), -1, false);

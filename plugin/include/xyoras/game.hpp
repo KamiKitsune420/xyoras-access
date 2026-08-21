@@ -36,10 +36,31 @@ namespace xyoras { namespace game {
     /// Human-readable, for the settings menu and the startup banner.
     const char *TitleName(void);
 
-    /// False when the running update version has not been verified against our
-    /// address table. Memory-dependent features must stay off in that case —
-    /// a confidently wrong reading is worse than an honest refusal.
-    bool   IsVersionSupported(void);
+    /// What has actually been checked against the running build.
+    ///
+    /// Verification is not one bit. The layout-text addresses were confirmed by
+    /// reading real text out of a running game; the save and battle offsets are
+    /// inherited from the community and have never been confirmed by this
+    /// project. Gating both on a single flag would mean either keeping a
+    /// working feature switched off, or switching on offsets nobody has
+    /// checked. Neither is acceptable, so each is asked about separately.
+    enum class Capability
+    {
+        /// nw::lyt::TextBox discovery and its string offset -- everything the
+        /// narration feature reads.
+        LayoutText,
+
+        /// The trainer block, bag, boxes and Pokedex offsets in addresses.cpp.
+        SaveData,
+
+        /// Battle slots and battle state.
+        BattleState
+    };
+
+    /// False when this capability has not been verified against the running
+    /// game and update version. A feature that reads memory must stay off in
+    /// that case — a confidently wrong reading is worse than an honest refusal.
+    bool   IsVerified(Capability capability);
 
     // -------------------------------------------------------------------------
     // Addresses

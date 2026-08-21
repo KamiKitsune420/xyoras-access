@@ -6,6 +6,7 @@
  * Lifecycle and startup order: "AI docks/05-plugin-architecture.md".
  */
 #include "xyoras/common.hpp"
+#include "xyoras/diagnostics.hpp"
 #include "xyoras/game.hpp"
 #include "xyoras/hotkeys.hpp"
 #include "xyoras/narrate.hpp"
@@ -13,14 +14,6 @@
 #include "xyoras/speech.hpp"
 
 #include <string>
-
-namespace xyoras { namespace diag {
-    bool IsSelfTestRequested(void);
-    bool IsWavDumpRequested(void);
-    void RunSelfTest(void);
-    void Checkpoint(const char *stage);
-    void ProbeFopen(const char *when);
-}}
 
 namespace CTRPluginFramework
 {
@@ -54,11 +47,11 @@ namespace CTRPluginFramework
 
             // Better to say plainly that readings cannot be trusted than to
             // speak confident nonsense derived from the wrong offsets.
-            if (!game::IsVersionSupported())
+            if (!game::IsVerified(game::Capability::LayoutText))
             {
                 speech::Say(speech::Priority::Critical,
-                            "Warning. This game update version has not been tested. "
-                            "Features that read game data are disabled.");
+                            "Warning. This game version has not been tested. "
+                            "Reading the screen is disabled.");
             }
         }
 
@@ -79,8 +72,10 @@ namespace CTRPluginFramework
             g_statusText += game::TitleName();
             g_statusText += "\nUpdate version: ";
             g_statusText += std::to_string(game::CurrentVersion());
-            g_statusText += "\nOffsets verified: ";
-            g_statusText += game::IsVersionSupported() ? "yes" : "no";
+            g_statusText += "\nScreen text verified: ";
+            g_statusText += game::IsVerified(game::Capability::LayoutText) ? "yes" : "no";
+            g_statusText += "\nSave offsets verified: ";
+            g_statusText += game::IsVerified(game::Capability::SaveData) ? "yes" : "no";
             g_statusText += "\nSpeech: ";
             g_statusText += speech::IsAvailable() ? "ready" : "unavailable";
             g_statusText += "\nAudio output: ";

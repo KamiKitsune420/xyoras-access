@@ -1462,3 +1462,109 @@ against.
 
 This is still **unmeasured on hardware**. It is a thousand times less guard
 overhead, not a measurement.
+
+---
+
+## 2026-08-21 — The narration path runs against the real game
+
+Ran the built plugin in the patched Azahar against Pokemon X and traced what it
+did. This is the first end-to-end confirmation that the mod reads the game's
+own text: scan, read, choose, speak.
+
+Trace of the language-selection screen, verbatim from
+`/xyoras-access/narration.txt`:
+
+```
+--- narration starting, TextBox vtable 5857608 ---
+baseline: 12 panes read
+  . Use the +Control Pad to select a language. Press the A Button to confirm.
+    Once your language has been set, you cannot change it in the middle of the game.
+  . English
+  . Spanish
+  . French
+  . German
+  . Italian
+  . Japanese
+  . Korean
+  . Play Pokemon X in
+  . Begin game
+  . Select language
+```
+
+An earlier run also spoke `YES`, `NO` and `English` as the screen changed —
+the narrator picking out what changed and staying quiet about the rest, which
+is the behaviour the design asks for.
+
+Still emulation only. Nothing here has run on hardware.
+
+### The gate had to be split before any of this could run
+
+The first attempt refused to start: `narration not started (unverified game)`.
+`IsVersionSupported()` was a single flag over the whole address table, and the
+table is a mix — the layout-text addresses were confirmed by this project,
+while the save and battle offsets are inherited from the community and have
+never been checked. One flag meant either keeping a working feature off, or
+switching on offsets nobody has verified.
+
+Replaced with `game::IsVerified(game::Capability)`, with a separate verified-
+version list per capability. `LayoutText` is verified for **XY version 0** (the
+base cartridge, no update); `SaveData` and `BattleState` are verified for
+nothing at all.
+
+The layout-text confirmation was made under emulation, and it holds anyway:
+those addresses are in `code.bin`, the same file at the same fixed base on
+hardware. What emulation cannot vouch for is timing and audio, and this
+capability depends on neither.
+
+### Scan cost, measured
+
+Measured on the game clock with `svcGetSystemTick`, in a running Pokemon X:
+
+| Scan | Cost |
+| --- | --- |
+| Full heap (0x08000000–0x08DF0000) | **551 ms** |
+| Narrowed to where panes were last found | **31 ms** |
+
+That is emulated timing — memory access is far more expensive there than on
+hardware, so neither number transfers. What does transfer is the **ratio**:
+about 18x, because the window is a small fraction of the heap.
+
+551 ms once a second was indefensible, so the cache now learns where panes were
+found and scans only that window, padded by 128 KB each side and page-aligned.
+Every tenth scan goes wide anyway, because a narrow scan cannot see panes
+allocated outside its window and the mod must not go permanently blind to part
+of the heap. A narrow scan that comes back empty proves only that the panes are
+not where they were, so it drops the window and goes wide immediately.
+
+**A bug the tests caught while this was being written:** an empty cache set
+`forced_`, so with no text on screen the plugin ran a full scan on *every*
+poll — 551 ms scans back to back for as long as a transition lasted. A scan
+that finds nothing now waits out the normal interval instead.
+
+### What the game's text actually looks like
+
+The first run spoke this:
+
+```
+  Would you like to start the game with this language?  <10><02>?<01>Once your
+  language has been set, you cannot change it in the middle of the game.<10><02>?
+```
+
+Three separate defects in one line:
+
+- **Inline text commands.** `0x10 0x02 0x00E9 0x01` runs sit in the middle of
+  sentences — engine markers for pauses, colour and substitution.
+- **The `?` was ours.** Non-ASCII was being replaced with `?`, and eSpeak reads
+  `?` as a question, turning a statement into one. Now dropped instead.
+- **Layout padding** — leading spaces, and double spaces where a command was
+  removed.
+
+Handling now: a code unit below 0x20 starts a command, and everything after it
+that is not plain ASCII is treated as its parameters and dropped; the first
+plain-ASCII character ends it. That rule was chosen because it fits what the
+game produced, and because it cannot swallow real text, which is always plain
+ASCII in an English script. **It is a heuristic, not a decoder** — the command
+format is not documented here, and decoding it properly is the real fix.
+
+Accented letters fold to their base letter (`Hungría` → `Hungria`) rather than
+being dropped; typographic quotes, dashes and ellipses fold to ASCII.
