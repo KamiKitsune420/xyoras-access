@@ -209,10 +209,21 @@ namespace {
         if (!diag::IsNarrationTraceRequested())
             return;
 
-        static bool dumped = false;
-        if (dumped)
+        // Dump the first few distinct screens, not just the first one. The
+        // open question is what separates the top screen from the bottom, and
+        // that needs a screen whose two displays hold obviously different
+        // things -- which the first screen after boot may not be.
+        static u32 dumps = 0;
+        static u32 lastCount = 0xFFFFFFFF;
+
+        const u32 count32 = static_cast<u32>(observed.size());
+        if (count32 == lastCount)
+            return;                 // same screen, nothing new to learn
+        lastCount = count32;
+
+        if (dumps >= 3)
             return;
-        dumped = true;
+        ++dumps;
 
         // More than a handful is unreadable and the file gets large.
         const u32 kMaxPanesToDump = 16;
@@ -320,9 +331,9 @@ namespace {
                                  " panes read");
             for (u32 i = 0; i < observed.size(); ++i)
                 diag::NarrationTrace("  . " + observed[i].text);
-
-            DumpPaneLayout(observed);
         }
+
+        DumpPaneLayout(observed);
 
         for (u32 i = 0; i < toSpeak.size(); ++i)
         {

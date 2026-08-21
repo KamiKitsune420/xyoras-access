@@ -1632,3 +1632,28 @@ different content and see what separates them.
 `DumpPaneLayout` in `narrate.cpp` runs once, only with the trace marker
 present, and writes the raw words beside the text they belong to. It is how
 this offset was found and it is how the next one will be.
+
+### The two-screen question is still open
+
+Tried to settle it by dumping the first three distinct screens instead of only
+the first. The run did not reach a second text screen: after the language
+screen the game sat with **zero panes** for the rest of the run, and nothing
+settled, so there was no second screen to compare.
+
+Two things worth keeping from that run:
+
+- **Auto-pressing A does not reliably get the game past the language screen.**
+  It worked in one earlier run and not in two later ones. Any test that needs a
+  later screen has to drive the input deliberately rather than cycling one
+  button and hoping.
+- **A blank screen costs full scans.** With nothing on screen, a narrow scan
+  finds nothing, correctly drops its window, and the next scan goes wide. So a
+  long transition pays a full scan every rescan interval. That is the intended
+  behaviour — the alternative is going blind to a screen whose panes moved —
+  but it is the worst case and it is worth knowing before reading any timing
+  measured during one.
+
+Also worth noting for whoever picks this up: `NarrationTrace` opens, writes and
+closes the file for every line, so a layout dump is roughly ninety file
+operations. That is fine on the narration thread and behind a marker file, but
+it is not something to leave running.
