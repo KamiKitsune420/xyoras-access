@@ -64,6 +64,11 @@ void Update(void)
             speech::StopAll();
             break;
 
+        case Action::DumpLayout:
+            // No-ops unless the trace marker is on the card.
+            narrate::RequestLayoutDump();
+            break;
+
         case Action::None:
         default:
             break;

@@ -32,6 +32,13 @@ namespace xyoras { namespace features { namespace narrate {
     /// announcing the new screen as a change from the old one.
     void RequestNewContext(void);
 
+    /// Write a snapshot of every layout object on screen to the trace file.
+    ///
+    /// Diagnostic. Does nothing without /xyoras-access/trace-narration. Sit on
+    /// a menu, move the cursor, ask for a snapshot, move again, ask again --
+    /// whatever differs between the snapshots is what marks the selection.
+    void RequestLayoutDump(void);
+
     /// How many text panes are currently being polled. For the diagnostics
     /// menu: a plausible number is evidence the scan is finding real objects.
     u32  TrackedPanes(void);

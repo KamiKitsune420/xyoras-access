@@ -71,6 +71,7 @@ namespace {
     bool    g_running         = false;
     bool    g_wantReadScreen  = false;
     bool    g_wantNewContext  = false;
+    bool    g_wantLayoutDump  = false;
     u32     g_trackedPanes    = 0;
 
     /// Readers for the scanning and reading helpers. Those take an injected
@@ -190,6 +191,9 @@ namespace {
         return read;
     }
 
+    void ProbeSiblingPanes(void);
+    void DumpPaneLayout(const std::vector<narration::Observation> &, bool);
+
     /// One-shot hex dump of what a TextBox holds before its string pointer.
     ///
     /// Read-screen currently reports panes in heap-address order, which is
@@ -204,26 +208,36 @@ namespace {
     /// table and this goes away.
     ///
     /// Only ever runs once, and only with tracing on.
-    void DumpPaneLayout(const std::vector<narration::Observation> &observed)
+    void DumpPaneLayout(const std::vector<narration::Observation> &observed,
+                        bool requested)
     {
         if (!diag::IsNarrationTraceRequested())
             return;
 
-        // Dump the first few distinct screens, not just the first one. The
-        // open question is what separates the top screen from the bottom, and
-        // that needs a screen whose two displays hold obviously different
-        // things -- which the first screen after boot may not be.
+        // Sample the screen a few times, spaced out, rather than once. Two
+        // open questions both need more than one sample: what separates the
+        // top screen from the bottom, and what marks the selected item. The
+        // second only shows up by comparing the same screen with the
+        // selection in different places.
+        // An explicit request is never rate-limited: the player is standing
+        // on the screen they want captured, and refusing them would be
+        // baffling.
         static u32 dumps = 0;
-        static u32 lastCount = 0xFFFFFFFF;
+        static u32 sinceDump = 0;
 
-        const u32 count32 = static_cast<u32>(observed.size());
-        if (count32 == lastCount)
-            return;                 // same screen, nothing new to learn
-        lastCount = count32;
-
-        if (dumps >= 3)
-            return;
-        ++dumps;
+        if (!requested)
+        {
+            if (dumps >= 4)
+                return;
+            if (dumps > 0 && ++sinceDump < 90)
+                return;             // roughly every few seconds
+            sinceDump = 0;
+            ++dumps;
+        }
+        else
+        {
+            diag::NarrationTrace("--- snapshot requested by the player ---");
+        }
 
         // More than a handful is unreadable and the file gets large.
         const u32 kMaxPanesToDump = 16;
@@ -252,6 +266,66 @@ namespace {
                                 ? Hex32(value) : "--------";
                 }
                 diag::NarrationTrace(line);
+            }
+        }
+
+        ProbeSiblingPanes();
+    }
+
+    /// Scans for the other NintendoWare layout classes and reports where they
+    /// are on screen.
+    ///
+    /// Text is only half of a screen. A menu cursor, a highlight bar and a
+    /// selected-item frame are Pictures and Windows, not TextBoxes, so "which
+    /// item is selected" -- the single most useful thing a menu can tell a
+    /// blind player -- is invisible to a TextBox-only scan.
+    ///
+    /// The hypothesis being tested: a cursor Picture sits at the same vertical
+    /// position as the row it is pointing at. If one Picture's ty matches a
+    /// language row's ty, selection can be read straight off the layout with
+    /// no code hooks and no save data.
+    ///
+    /// Exploratory. Delete once it has answered its question.
+    void ProbeSiblingPanes(void)
+    {
+        struct Probe { const char *name; const game::AddrPair *vt; };
+        const Probe probes[] = {
+            { "Picture",  &game::addr::kVtPicture  },
+            { "Window",   &game::addr::kVtWindow   },
+            { "Pane",     &game::addr::kVtPane     },
+            { "Layout",   &game::addr::kVtLayout   },
+        };
+
+        for (u32 p = 0; p < sizeof(probes) / sizeof(probes[0]); ++p)
+        {
+            const u32 vtable = game::Addr(*probes[p].vt);
+            if (vtable == 0)
+                continue;
+
+            std::vector<u32> hits(kMaxPanes, 0);
+            const u32 found = vtscan::FindObjectsBlockwise(
+                ReadBlock, nullptr, game::kHeapMin, game::kHeapMax, vtable,
+                &hits[0], kMaxPanes, g_scanBuffer, vtscan::kPageSize / 4);
+
+            diag::NarrationTrace(std::string("probe ") + probes[p].name + ": " +
+                                 std::to_string(found) + " live");
+
+            // Positions only. Enough to correlate against the text rows,
+            // without pages of hex for objects we cannot name.
+            const u32 show = found < 96 ? found : 96;
+            for (u32 i = 0; i < show; ++i)
+            {
+                u32 tx = 0, ty = 0, w = 0, h = 0;
+                game::Read32(hits[i] + game::addr::kPaneTranslateX, tx);
+                game::Read32(hits[i] + game::addr::kPaneTranslateY, ty);
+                game::Read32(hits[i] + game::addr::kPaneSizeW, w);
+                game::Read32(hits[i] + game::addr::kPaneSizeH, h);
+
+                diag::NarrationTrace("  " + Hex32(hits[i]) +
+                                     "  tx=" + Hex32(tx) +
+                                     " ty=" + Hex32(ty) +
+                                     " w=" + Hex32(w) +
+                                     " h=" + Hex32(h));
             }
         }
     }
@@ -287,10 +361,13 @@ namespace {
     void PollOnce(void)
     {
         bool readScreen = false;
+        bool layoutDump = false;
         {
             Lock lock(g_lock);
             readScreen       = g_wantReadScreen;
             g_wantReadScreen = false;
+            layoutDump       = g_wantLayoutDump;
+            g_wantLayoutDump = false;
 
             if (g_wantNewContext)
             {
@@ -333,7 +410,7 @@ namespace {
                 diag::NarrationTrace("  . " + observed[i].text);
         }
 
-        DumpPaneLayout(observed);
+        DumpPaneLayout(observed, layoutDump);
 
         for (u32 i = 0; i < toSpeak.size(); ++i)
         {
@@ -447,6 +524,12 @@ void RequestNewContext(void)
 {
     Lock lock(g_lock);
     g_wantNewContext = true;
+}
+
+void RequestLayoutDump(void)
+{
+    Lock lock(g_lock);
+    g_wantLayoutDump = true;
 }
 
 u32 TrackedPanes(void)

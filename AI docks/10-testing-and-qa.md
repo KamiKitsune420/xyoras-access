@@ -142,21 +142,35 @@ worked and playback did not. Add `SD:/xyoras-access/dump-audio`, boot again,
 and listen to the .wav files in `SD:/xyoras-access/speech/` on a computer. If
 they sound correct, the problem is CSND alone and nothing upstream.
 
-### Your cart may be updated, and then narration will refuse to start
+### Check the game version before blaming anything else
 
-`LayoutText` is verified for **XY version 0 only** — a base cartridge with no
-update installed. An update replaces `code.bin`, which moves every address the
-scan depends on.
+`LayoutText` is verified for **XY version 0 only** — the base game with no
+update applied. An update replaces `code.bin`, which moves every address the
+scan depends on, so narration will refuse to start on any other version and say
+so out loud. **That refusal is correct behaviour, not a bug.**
 
-So if the console has ever been online with the game in it, narration will
-likely refuse to start and say so. **That is correct behaviour, not a bug**:
-scanning for a vtable address from a different build finds nothing at best and
-the wrong objects at worst.
+How likely you are to hit it depends on how the game is installed:
 
-The CTRPF menu's Status entry shows the detected update version. If it is not
-0, that number is the first thing to write down — the vtable addresses have to
-be re-derived for that build before narration can run on it, and the method is
-in `04-gen6-reverse-engineering.md`.
+| Install | Version situation |
+| --- | --- |
+| **CIA installed with FBI** | Whatever the CIA was. A base-game CIA is version 0 and needs nothing further. Updates are a *separate title* (`0004000E00055D00`) that has to be installed deliberately — a system update does not touch it |
+| Retail cartridge | Whatever update the console has downloaded for it, which for an online console is usually the latest |
+
+So a CIA install is the **better** case: unless a game-update CIA was
+deliberately installed alongside the base one, the running code is the base
+build.
+
+Two ways to check, in order of convenience:
+
+1. **FBI → titles.** If `0004000E00055D00` (X) is not listed, no update is
+   installed and the base game is what runs.
+2. **The plugin's own Status entry** in the CTRPF menu reports the detected
+   update version.
+
+If it is not 0, write that number down. The vtable addresses have to be
+re-derived for that build before narration can run on it; the method is in
+`04-gen6-reverse-engineering.md`, and it is the same method that found them the
+first time, so it is a known quantity rather than new research.
 
 ### What to bring back
 

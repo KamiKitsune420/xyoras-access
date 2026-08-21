@@ -54,6 +54,10 @@ namespace xyoras { namespace game { namespace addr {
     extern const AddrPair kVtMsgWin;
     extern const AddrPair kVtTextBox;
     extern const AddrPair kVtPane;
+    extern const AddrPair kVtPicture;
+    extern const AddrPair kVtWindow;
+    extern const AddrPair kVtBounding;
+    extern const AddrPair kVtLayout;
 
     // Pane geometry, within an nw::lyt::Pane. Only kPaneTranslateY is
     // verified; read the definitions before trusting the others.

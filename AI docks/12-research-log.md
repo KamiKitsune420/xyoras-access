@@ -1657,3 +1657,74 @@ Also worth noting for whoever picks this up: `NarrationTrace` opens, writes and
 closes the file for every line, so a layout dump is roughly ninety file
 operations. That is fine on the narration thread and behind a marker file, but
 it is not something to leave running.
+
+---
+
+## 2026-08-21 — The rest of the layout family, and what a menu row looks like
+
+Text is only half of a screen. A menu cursor, a highlight bar and a selected-item
+frame are not TextBoxes, so "which item is selected" — the single most useful
+thing a menu can tell a blind player — is invisible to a TextBox-only scan.
+
+`tools/find_vtables.py` produced the rest of the family from `code.bin`, and a
+scan confirmed every one of them alive in a running game:
+
+| Class | vptr (XY v0) | Live instances observed |
+| --- | --- | --- |
+| `nw::lyt::TextBox` | `0x00596148` | 12–21 |
+| `nw::lyt::Picture` | `0x005960BC` | **124** |
+| `nw::lyt::Window` | `0x00596028` | 4–20 |
+| `nw::lyt::Pane` | `0x00595F24` | 53–76 |
+| `nw::lyt::Bounding` | `0x005961DC` | not yet probed |
+| `nw::lyt::Layout` | `0x00595FDC` | **7** |
+
+### A menu row is a Picture and a TextBox at the same place
+
+On the language screen, every one of the seven language rows has a `Picture` at
+**exactly** the same `ty` as its `TextBox`, sized `320 x 24`:
+
+```
+  08236F10  ty  -10.00   320 x 24     <-- "English"
+  0823C088  ty  -40.00   320 x 24     <-- "Spanish"
+  08241200  ty  -70.00   320 x 24     <-- "French"
+  ...
+  082557E0  ty -190.00   320 x 24     <-- "Korean"
+```
+
+So a menu's rows can be enumerated with their geometry — a row is a labelled
+box of known size and position — before knowing anything about selection.
+
+### The coordinate system
+
+Several Pictures are `400.0 x 240.0`, which is exactly the 3DS top screen, with
+bars at `ty = +120` and `ty = -120`. So **the origin is the centre of the
+screen and +y is up.**
+
+But the language rows run down to `ty = -190`, well past the bottom edge at
+-120. So the `ty` we read is a pane's **local** translation within its parent,
+not its position on the screen. Anything comparing panes across different
+parents — which is exactly what a sensible reading order needs — has to walk up
+the parent chain or find the computed global matrix. That is the same wall as
+the top-screen/bottom-screen question, and probably has the same answer: **only
+7 `Layout` objects exist**, and a Layout is the root that owns a screen's pane
+tree.
+
+### Selection is still unknown, and the emulator cannot answer it
+
+Sampling the same screen four times while cycling D-Pad Down found exactly one
+Picture that moved — a `10 x 10` element sliding from `(0, 0)` to `(165, 192)`
+to `(165, 195)`. That is a scroll or animation indicator, not a row cursor:
+rows are 30 units apart and this moved 3.
+
+The real problem is that **the emulator will not sit still on a menu.** Auto-
+pressing a button cycles the game onward, and by the second sample it had left
+the language screen entirely. Every attempt to answer this under emulation has
+failed for the same reason.
+
+**On hardware this is trivial** — a person sits on a menu and moves the cursor.
+So the question is handed to the console instead: `Modifier + X` writes a
+layout snapshot to the trace file. Sit on a menu, snapshot, move the cursor,
+snapshot again; whatever differs is what marks the selection.
+
+It does nothing without `/xyoras-access/trace-narration`, so it cannot surprise
+a player, and it hands the chord back when the position report needs it.

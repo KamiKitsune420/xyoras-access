@@ -50,7 +50,22 @@ namespace xyoras { namespace hotkeys {
         None = 0,
         ReadScreen,     ///< Modifier tapped alone: read everything on screen.
         RepeatLast,     ///< Modifier + A.
-        StopSpeech      ///< Modifier + B.
+        StopSpeech,     ///< Modifier + B.
+
+        /// Modifier + X: write a snapshot of the screen's layout objects to
+        /// the trace file.
+        ///
+        /// A diagnostic, not a player feature. It does nothing at all unless
+        /// /xyoras-access/trace-narration is present, so it cannot surprise
+        /// anyone and it does not really occupy this chord -- Modifier + X is
+        /// the position report in the design, and takes it back when that
+        /// exists.
+        ///
+        /// It is here because the question it answers -- what marks the
+        /// SELECTED item in a menu -- cannot be answered without sitting on a
+        /// menu and moving the cursor, which is trivial on a console and has
+        /// so far proved impossible to drive reliably under emulation.
+        DumpLayout
     };
 
     /// The buttons that make up the modifier itself, on either model.
@@ -102,6 +117,8 @@ namespace xyoras { namespace hotkeys {
                     action = Action::RepeatLast;
                 else if ((partner & key::kB) != 0)
                     action = Action::StopSpeech;
+                else if ((partner & key::kX) != 0)
+                    action = Action::DumpLayout;
 
                 if (action != Action::None)
                 {

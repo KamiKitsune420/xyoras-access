@@ -155,6 +155,29 @@ namespace xyoras { namespace game { namespace addr {
     /// nw::lyt::Pane -- layout panes generally.
     const AddrPair kVtPane         = { 0x00595F24, 0 };
 
+    // The rest of the NintendoWare layout family. Derived from RTTI in
+    // code.bin by tools/find_vtables.py -- the same method that produced
+    // kVtTextBox, which live objects then confirmed. These have NOT yet been
+    // confirmed against live objects.
+    //
+    // They matter because text is only half of a screen. A menu cursor, a
+    // highlight bar and a selected-item frame are Pictures, not TextBoxes, so
+    // "which item is selected" is invisible to a TextBox-only scan.
+
+    /// nw::lyt::Picture -- images, and very likely menu cursors/highlights.
+    const AddrPair kVtPicture      = { 0x005960BC, 0 };
+
+    /// nw::lyt::Window -- the nine-slice frames that box menus and dialogue.
+    const AddrPair kVtWindow       = { 0x00596028, 0 };
+
+    /// nw::lyt::Bounding -- invisible hit/extent regions.
+    const AddrPair kVtBounding     = { 0x005961DC, 0 };
+
+    /// nw::lyt::Layout -- the root that owns a screen's pane tree. Likely the
+    /// key to telling the top screen from the bottom, which is the open
+    /// question blocking a sensible reading order.
+    const AddrPair kVtLayout       = { 0x00595FDC, 0 };
+
     // -------------------------------------------------------------------------
     // Pane geometry, within an nw::lyt::Pane
     //

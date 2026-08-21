@@ -32,6 +32,7 @@ namespace {
             case Action::ReadScreen: return "ReadScreen";
             case Action::RepeatLast: return "RepeatLast";
             case Action::StopSpeech: return "StopSpeech";
+            case Action::DumpLayout: return "DumpLayout";
         }
         return "?";
     }
@@ -139,13 +140,31 @@ namespace {
     {
         test::Section("modifier plus a key we have not bound yet");
 
-        // Modifier + X is a planned command that does not exist. It must do
+        // Modifier + Y is a planned command that does not exist. It must do
         // nothing -- and crucially must NOT read the whole screen on release,
         // which is what the player would hear if the tap still counted.
         ChordReader c;
         Hold(c, kZL, 2);
-        CheckAction(c.Update(kZL | key::kX), Action::None, "nothing happens");
+        CheckAction(c.Update(kZL | key::kY), Action::None, "nothing happens");
         CheckAction(c.Update(kNone), Action::None, "and the release is silent too");
+    }
+
+    void TestLayoutDumpChord(void)
+    {
+        test::Section("the diagnostic snapshot chord");
+
+        // Modifier + X asks for a layout snapshot. The chord has to work
+        // repeatedly without letting go of the modifier, because the whole
+        // point is to capture the same screen several times with the cursor
+        // in different places.
+        ChordReader c;
+        Hold(c, kZL, 2);
+        CheckAction(c.Update(kZL | key::kX), Action::DumpLayout, "asks for a snapshot");
+
+        c.Update(kZL);                                  // X released
+        CheckAction(c.Update(kZL | key::kX), Action::DumpLayout, "and again, without releasing");
+
+        CheckAction(c.Update(kNone), Action::None, "the release stays silent");
     }
 
     void TestPlainButtonsAreIgnored(void)
@@ -225,6 +244,7 @@ int main(void)
     TestHeldPartnerDoesNotRepeat();
     TestPartnerCanFireTwice();
     TestUnboundPartnerConsumesTheChord();
+    TestLayoutDumpChord();
     TestPlainButtonsAreIgnored();
     TestResetDropsChord();
     TestChordStartedWithKeyAlreadyDown();
