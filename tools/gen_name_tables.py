@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""Generate the compiled-in English name tables for XYORAS Access.
+
+The plugin needs to say "Pikachu" rather than "species 25". Two ways to get
+there: read the names out of the player's own RomFS at runtime, or ship a
+table. We ship a table -- see "AI docks/04-gen6-reverse-engineering.md" for
+why -- and this is what builds it.
+
+Source
+------
+The lists come from PKHeX's English text resources. PKHeX is GPL-3.0 and so is
+this project, so reusing them is licence-compatible; attribution is in the
+generated header, in the README, and in "AI docks/14-legal-and-licensing.md".
+
+Only names are taken. No Pokedex entries, no flavour text, no item
+descriptions -- those are creative content and are read from the player's own
+game at runtime instead, never shipped.
+
+Everything is trimmed to Generation 6 ranges, so nothing from later
+generations is carried along:
+
+    species    0-721    (Egg .. Volcanion)
+    moves      0-621    (-- .. Hyperspace Fury; 622 is a Gen 7 Z-move)
+    abilities  0-191    (-- .. Delta Stream)
+    items      0-775    (ORAS has the larger list; XY stops at 717)
+
+Usage
+-----
+    python tools/gen_name_tables.py --fetch          # download, then generate
+    python tools/gen_name_tables.py --from /tmp/names
+
+Writes plugin/source/data/names_*.cpp and plugin/include/xyoras/names.hpp.
+"""
+
+import argparse
+import os
+import sys
+import urllib.request
+
+# Highest valid index in Generation 6, inclusive.
+LIMITS = {
+    "Species": 721,
+    "Moves": 621,
+    "Abilities": 191,
+    "Items": 775,
+}
+
+PKHEX = "https://raw.githubusercontent.com/kwsch/PKHeX/master/PKHeX.Core/Resources/text"
+SOURCES = {
+    "Species": f"{PKHEX}/other/en/text_Species_en.txt",
+    "Moves": f"{PKHEX}/other/en/text_Moves_en.txt",
+    "Abilities": f"{PKHEX}/other/en/text_Abilities_en.txt",
+    "Items": f"{PKHEX}/items/text_Items_en.txt",
+    "Natures": f"{PKHEX}/other/en/text_Natures_en.txt",
+    "Types": f"{PKHEX}/other/en/text_Types_en.txt",
+}
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+HEADER = """/*
+ * XYORAS Access -- generated English name table: {what}
+ *
+ * GENERATED FILE. Do not edit by hand; edit tools/gen_name_tables.py and
+ * re-run it.
+ *
+ * Names derive from PKHeX's English text resources (GPL-3.0, same licence as
+ * this project) and are trimmed to Generation 6 indices. Names only -- no
+ * Pokedex entries, flavour text, or descriptions. See
+ * "AI docks/14-legal-and-licensing.md".
+ *
+ * {count} entries, indices 0-{last}.
+ */
+#include "xyoras/names.hpp"
+
+namespace xyoras {{ namespace names {{
+
+const char *const k{what}[] = {{
+{entries}}};
+
+const u32 k{what}Count = {count};
+
+}}}} // namespace xyoras::names
+"""
+
+
+def fetch(dest):
+    os.makedirs(dest, exist_ok=True)
+    for name, url in SOURCES.items():
+        path = os.path.join(dest, f"{name}.txt")
+        print(f"  fetching {name}")
+        with urllib.request.urlopen(url, timeout=60) as r:
+            data = r.read().decode("utf-8")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(data)
+
+
+def load(src, name):
+    path = os.path.join(src, f"{name}.txt")
+    with open(path, encoding="utf-8") as f:
+        # Keep blank entries: index position is meaningful and must not shift.
+        return [line.rstrip("\r\n") for line in f]
+
+
+def escape(s):
+    """C string literal body. Non-ASCII becomes '?' -- eSpeak is fed ASCII, and
+    a stray accented character would be spoken as noise or dropped."""
+    out = []
+    for ch in s:
+        if ch == '"':
+            out.append('\\"')
+        elif ch == "\\":
+            out.append("\\\\")
+        elif 32 <= ord(ch) < 127:
+            out.append(ch)
+        elif ch == "é":       # Poke'mon, Poke' Ball and friends
+            out.append("e")
+        else:
+            out.append("?")
+    return "".join(out)
+
+
+def generate(src, out_dir, inc_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(inc_dir, exist_ok=True)
+    written = []
+
+    for what, last in LIMITS.items():
+        entries = load(src, what)
+        if len(entries) <= last:
+            print(f"  WARNING: {what} has {len(entries)} entries, expected > {last}")
+            last = len(entries) - 1
+
+        trimmed = entries[: last + 1]
+        body = "".join(f'    "{escape(e)}",\n' for e in trimmed)
+
+        path = os.path.join(out_dir, f"names_{what.lower()}.cpp")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(HEADER.format(what=what, count=len(trimmed),
+                                  last=len(trimmed) - 1, entries=body))
+        written.append((what, len(trimmed), path))
+        print(f"  {what:<10} {len(trimmed):>4} entries -> {os.path.basename(path)}")
+
+    header = '''/*
+ * XYORAS Access -- English name lookups.
+ * Copyright (C) 2026 XYORAS Access contributors. GPL-3.0; see LICENSE.
+ *
+ * The tables themselves are generated by tools/gen_name_tables.py. Always use
+ * these accessors rather than indexing the arrays: an out-of-range index from
+ * a bad memory read must produce "unknown", not a crash.
+ */
+#ifndef XYORAS_NAMES_HPP
+#define XYORAS_NAMES_HPP
+
+#include "xyoras/common.hpp"
+
+namespace xyoras { namespace names {
+
+'''
+    for what, _count, _ in written:
+        header += f"    extern const char *const k{what}[];\n"
+        header += f"    extern const u32 k{what}Count;\n"
+    header += '''
+    /// Bounds-checked lookup. Never returns null.
+    inline const char *Lookup(const char *const table[], u32 count, u32 index)
+    {
+        if (index >= count)
+            return "unknown";
+        const char *s = table[index];
+        return (s != nullptr && s[0] != '\\0') ? s : "unknown";
+    }
+
+'''
+    for what, _, _ in written:
+        singular = {"Species": "Species", "Moves": "Move",
+                    "Abilities": "Ability", "Items": "Item"}[what]
+        header += (f"    inline const char *{singular}(u32 index)"
+                   f" {{ return Lookup(k{what}, k{what}Count, index); }}\n")
+    header += '''
+}} // namespace xyoras::names
+
+#endif
+'''
+    hpath = os.path.join(inc_dir, "names.hpp")
+    with open(hpath, "w", encoding="utf-8", newline="\n") as f:
+        f.write(header)
+    print(f"  header     -> {os.path.basename(hpath)}")
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--fetch", action="store_true", help="download the source lists first")
+    ap.add_argument("--from", dest="src", default=os.path.join(ROOT, "tools", "_names"),
+                    help="directory holding the source .txt lists")
+    args = ap.parse_args()
+
+    if args.fetch:
+        print("downloading name lists")
+        fetch(args.src)
+
+    if not os.path.isdir(args.src):
+        print(f"no source directory {args.src}; run with --fetch", file=sys.stderr)
+        raise SystemExit(2)
+
+    print("generating tables")
+    generate(args.src,
+             os.path.join(ROOT, "plugin", "source", "data"),
+             os.path.join(ROOT, "plugin", "include", "xyoras"))
+    print("done")

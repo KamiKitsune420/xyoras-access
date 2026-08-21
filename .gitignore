@@ -39,3 +39,4 @@ desktop.ini
 # ---- Logs & scratch ----
 *.log
 scratch/
+tools/_names/
