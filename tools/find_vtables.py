@@ -48,6 +48,48 @@ def find_all(data, needle, start=0):
     return out
 
 
+# ARM function entries almost always begin by saving registers. These are the
+# common encodings; the list is deliberately narrow, so a "partial" score means
+# the detector did not recognise a prologue, not that the vtable is wrong.
+def prologue_kind(word):
+    if (word & 0xFFFF0000) == 0xE92D0000:      # stmfd sp!, {..} / push
+        return "push"
+    if (word & 0x0FFF0000) == 0x092D0000:      # conditional push
+        return "push?"
+    if (word & 0xFFFFF000) == 0xE24DD000:      # sub sp, sp, #n
+        return "sub sp"
+    if (word & 0xFFF00000) == 0xE5200000:      # str rX, [sp, #-n]!
+        return "str!"
+    return None
+
+
+def verify_vtable(data, base, vt_va, entries=8):
+    """Do this vtable's entries point at real ARM functions?
+
+    A genuine vtable is followed by function pointers, and those functions
+    begin with a recognisable prologue. Checking that distinguishes a real
+    vtable from an accidental match on a typeinfo pointer.
+    """
+    off = vt_va - base
+    good = total = 0
+    samples = []
+    for i in range(1, entries + 1):
+        p = off + i * 4
+        if p + 4 > len(data):
+            break
+        (fn,) = struct.unpack_from("<I", data, p)
+        if fn == 0 or not (base <= fn < base + len(data)):
+            continue
+        total += 1
+        (insn,) = struct.unpack_from("<I", data, fn - base)
+        kind = prologue_kind(insn)
+        if kind:
+            good += 1
+            if len(samples) < 2:
+                samples.append(f"{fn:08X}:{insn:08X}({kind})")
+    return good, total, samples
+
+
 def analyse(data, base, name):
     mangled = mangle(name)
     target = mangled.encode() + b"\x00"
@@ -97,8 +139,13 @@ def analyse(data, base, name):
                         fns.append(fn)
                 plausible = sum(1 for f in fns if base <= f < base + len(data))
                 verdict = "vtable" if plausible >= 3 else "reference"
-                print(f"      {verdict:<9} : va 0x{vt_va:08X}"
-                      f"   first fns " + " ".join(f"{f:08X}" for f in fns[:3]))
+                line = (f"      {verdict:<9} : va 0x{vt_va:08X}"
+                        f"   first fns " + " ".join(f"{f:08X}" for f in fns[:3]))
+                if verdict == "vtable":
+                    good, total, samples = verify_vtable(data, base, vt_va)
+                    line += (f"\n        prologues {good}/{total}  "
+                             + " ".join(samples))
+                print(line)
 
 
 if __name__ == "__main__":

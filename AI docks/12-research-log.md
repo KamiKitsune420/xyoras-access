@@ -1083,3 +1083,33 @@ practical techniques neither of which needs a disassembler:
 **Next:** confirm a vtable by finding a live object. The plugin can scan the
 heap for a pointer to `0x005970FC` while a message box is on screen; a hit
 proves the address and hands us the object in one step.
+
+### Vtables verified statically
+
+The candidate vtables were checked by a second, independent property: a real
+vtable is followed by function pointers, and ARM functions begin with a
+recognisable prologue. `tools/find_vtables.py --` now reports this.
+
+| Class | vtable | entries with a recognised prologue |
+| --- | --- | --- |
+| `app::tool::TalkWindow` | `0x005970FC` | **8/8** |
+| `app::tool::MenuWindowSystem` | `0x00597334` | 6/7 |
+| `gfl::str::StrBuf` | `0x0059856C` | 5/7 |
+| `gfl::str::StrWin` | `0x0059857C` | 5/8 |
+| `print::MsgWin` | `0x00599A5C` | 5/8 |
+| `gfl::str::MsgData` | `0x005985B0` | 3/6 |
+| others | | 2/6 |
+
+Every one of them has multiple entries pointing at `E92D4010`, `E92D4070` or
+`E92D41F0` -- all encodings of `push {..., lr}`, the canonical ARM function
+prologue. The scores below 100% are the detector being deliberately narrow
+(ARM functions may open with `ldr`, `cmp`, `mov r12, sp` and others), not
+evidence against the addresses.
+
+`app::tool::TalkWindow` scoring 8/8 is the strongest result, and it is the one
+that matters most.
+
+**This raises confidence from "internally consistent" to "structurally
+verified", but it is still static.** Nothing has been confirmed against a
+running game, and the addresses stay marked UNVERIFIED in `addresses.cpp` until
+something confirms them at runtime.
