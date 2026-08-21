@@ -163,6 +163,30 @@ changing a test -- deliberately.
 | The facing scan is terse by default | It is spoken constantly; every extra word costs time |
 | Coordinates are verbose-only | Speaking them by default is noise |
 
+## Reading the game's own text
+
+Gen 6 draws every piece of text through `nw::lyt::TextBox`, and each instance
+points at its UTF-16 string. So dialogue, menus and labels are all readable by
+the same mechanism, with no render hook -- see `12-research-log.md`.
+
+One consequence shapes the whole design: **message boxes type text out one
+character at a time.** A poll mid-animation sees "Y", then "Yo", then "You".
+Speaking each change would stutter the opening syllable of every line dozens of
+times, and the mod would be unusable.
+
+So text is spoken only once it has stopped changing (`screentext.hpp`). While
+the animation runs the string keeps differing and the settle counter resets;
+when it stops, the finished line is spoken once, whole.
+
+Related rules that follow from the same place:
+
+| Rule | Why |
+| --- | --- |
+| Text leaving the screen clears the memory of it | Reading the same sign twice should speak it twice |
+| Text that never leaves is not re-spoken | Otherwise a static label repeats forever |
+| Each source of text has its own tracker | A busy menu must not suppress a story line |
+| An explicit reset on context change | Entering a battle must not be silenced by identical earlier text |
+
 ## Anti-patterns to avoid
 
 - Speaking the same text twice because two subsystems both noticed a change.
