@@ -716,3 +716,54 @@ parser is what actually has to accept the file. Non-obvious points:
 bytes: 32 checks mirroring each condition libcwav tests. Worth having, because
 a single wrong field yields an opaque status code whose only symptom on a
 console is silence.
+
+---
+
+## 2026-08-21 — Physical address verification; emulator build blocked on disk
+
+**Goal:** implement CSND audio output in Azahar so the speech could actually be
+heard, closing the last unverified link.
+
+**Blocked, deliberately.** The only drive on this machine is at **100% (9.3 GB
+free of 931 GB)**. An Azahar clone with submodules is 1-2 GB and an MSVC build
+of a Citra-class project is several more. Attempting it unattended risked
+filling the system drive with nobody present to intervene, which is a worse
+outcome than not having the test. Not attempted; left for a time when there is
+headroom.
+
+### What was verified instead
+
+The one remaining *checkable* link was the physical address. libcwav passes
+CSND the **physical** address of the sample data, obtained through the VA->PA
+callback we supply. If that conversion silently failed, CSND would read from
+the wrong place and play noise -- and every check made so far would still pass,
+because both the container and the command stream would be perfectly valid.
+
+Measured from inside the plugin:
+
+```
+rate=22050 samples=71473  bytes=142946 va=16B48088 pa=22B48088 (FCRAM)
+rate=22050 samples=133471 bytes=266942 va=16B6B088 pa=22B6B088 (FCRAM)
+```
+
+Both deltas are exactly **0x0C000000**, which is the documented 3DS linear
+mapping (linear VA base `0x14000000` -> PA base `0x20000000`), and the low 24
+bits are identical in each case. So `svcConvertVAToPA` is returning the correct
+translation, not merely a plausible-looking number, and the buffer sits in
+FCRAM where CSND can reach it.
+
+### State of verification
+
+| Link | Status | How |
+| --- | --- | --- |
+| PCM is real speech | verified | WAV dump analysed: 3.2 s / 6.2 s, RMS ~3300, peak ~29000 no clipping, 57% voiced |
+| BCWAV container valid | verified | 32 host checks mirroring libcwav's parser, plus `cwavLoad` returning SUCCESS |
+| libcwav accepts and plays | verified | `cwavPlay` SUCCESS, channel acquired |
+| CSND command stream well-formed | verified | 5 `ExecuteCommands` batches, 0 unrecognised commands |
+| Sample address reaching CSND | verified | VA->PA delta exactly 0x0C000000, lands in FCRAM |
+| **Audible output** | **unverified** | needs CSND mixing: no emulator implements it, and hardware is unavailable |
+
+Everything that can be checked without either a console or a patched emulator
+has now been checked. The remaining risk is confined to the mixer itself --
+whether correct samples at a correct address, at a correct rate, produce the
+expected sound.

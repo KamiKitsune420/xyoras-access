@@ -151,7 +151,33 @@ namespace {
                 return false;
             }
 
-            diag::Checkpoint("cwav: play OK");
+            // Verify the address CSND is actually handed. libcwav passes the
+            // PHYSICAL address of the sample data, obtained through our
+            // callback. If that conversion silently failed, CSND would read
+            // from nowhere and play noise or silence -- and every check up to
+            // this point would still have passed, because the container and
+            // the command stream would both be perfectly valid.
+            //
+            // FCRAM lives at 0x20000000 and up, so a plausible PA is the
+            // cheapest way to catch a broken conversion.
+            {
+                const void *pcmStart = slot.buffer + bcwav::PcmOffset();
+                const u32   pa       = svcConvertVAToPA(pcmStart, false);
+
+                char msg[128];
+                std::snprintf(msg, sizeof(msg),
+                              "cwav: play OK  rate=%d samples=%lu bytes=%lu "
+                              "va=%08lX pa=%08lX%s",
+                              sampleRate,
+                              (unsigned long)samples,
+                              (unsigned long)(samples * sizeof(s16)),
+                              (unsigned long)(u32)pcmStart,
+                              (unsigned long)pa,
+                              (pa >= 0x20000000u) ? " (FCRAM, plausible)"
+                                                  : " (SUSPECT)");
+                diag::Checkpoint(msg);
+            }
+
             return true;
         }
 
