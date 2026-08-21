@@ -1164,3 +1164,70 @@ wrong rather than that the address was four bytes off.
 | Objects store vptr = typeinfo + 4 | **verified** (ABI layout read directly) |
 | Scanning finds a live `TalkWindow` | not yet -- needs a message box on screen |
 | Any of this holds for ORAS | not investigated; no ORAS executable |
+
+---
+
+## 2026-08-21 — Live objects found by vptr scan; StrBuf layout mapped
+
+Added a heap scanner to Azahar (`XYORAS_SCAN_VPTR`) that walks the application
+heap page by page looking for a given vptr. Run at the language-select screen,
+with no game input:
+
+| Class | vptr | live objects |
+| --- | --- | --- |
+| `gfl::str::StrBuf` | `0x00598570` | **42** |
+| `gfl::str::MsgData` | `0x005985B4` | **6** |
+| `app::tool::TalkWindow` | `0x00597100` | 0 |
+| `app::tool::MenuWindow` | `0x005970E0` | 0 |
+| `print::MsgWin` | `0x00599A60` | 0 |
+| `gfl::str::StrWin` | `0x00598580` | 0 |
+
+**The discrimination is the result, not the counts.** String buffers and
+message archives exist because there is text on screen; dialogue boxes and
+in-game menus do not, because the game has not started. Wrong addresses would
+give zeros everywhere or noise everywhere. Getting exactly the classes that
+should be present, and none that should not, confirms the addresses, the
+scanning technique, and the class identification together.
+
+### gfl::str::StrBuf layout
+
+Reading a few instances gives a consistent structure:
+
+```
++0x00  vptr        0x00598570
++0x04  char*       pointer to the text buffer
++0x08  u32         capacity in characters (seen: 0x100, 0x40)
++0x0C  u32         1 in every instance seen
++0x10  u32         varies (0x5544, 0x4652) -- unidentified
+```
+
+The buffer is allocated immediately after the object (object + 0x40) in every
+case observed, though that is an allocator artefact and should not be relied
+on -- follow the pointer at +0x04.
+
+At the language-select screen the buffers are all zero: the objects are
+pre-allocated and empty, nothing having been formatted into them yet.
+
+### Where this leaves the message hook
+
+Confirmed, in a running game:
+
+- `code.bin` is based at `0x00100000`
+- the nine vtable addresses are correct
+- an object's vptr is typeinfo + 4
+- scanning the heap for a vptr finds live objects
+- the classes found match what should exist at that moment
+- `StrBuf` holds its text behind a pointer at +0x04, with capacity at +0x08
+
+Not yet confirmed:
+
+- reading actual formatted dialogue text, which needs the game to reach a
+  message box
+- anything at all about ORAS
+
+The remaining obstacle is no longer knowledge -- it is that the game sits at
+the language-select screen and progressing needs button input the emulator does
+not expose to us. Worth trying next: synthesising key events to the Azahar
+window from the host, which would let the game be driven far enough to open a
+dialogue box, at which point `TalkWindow` should appear in a scan and its
+`StrBuf` should hold readable text.
