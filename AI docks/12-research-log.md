@@ -1113,3 +1113,54 @@ that matters most.
 verified", but it is still static.** Nothing has been confirmed against a
 running game, and the addresses stay marked UNVERIFIED in `addresses.cpp` until
 something confirms them at runtime.
+
+---
+
+## 2026-08-21 — Vtable addresses confirmed in a running game
+
+The statically-derived vtables were checked against the **live process**, by
+patching Azahar to read arbitrary addresses once the game is up
+(`XYORAS_VERIFY_VT`, read after the first CRO loads so code.bin is certainly
+mapped). No game input needed.
+
+Every address returned exactly what static analysis predicted:
+
+```
+0X005970FC: 0057DB64 00332610 003325CC 003324F0     app::tool::TalkWindow
+0X0059856C: 0057E18C 0012AD4C 0038E5B8 00000000     gfl::str::StrBuf
+0X005985B0: 0057E19C 0038FC20 0038FBC4 00000000     gfl::str::MsgData
+0X005970DC: 0057DB54 00331364 003312F4 00000000     app::tool::MenuWindow
+0X00599A5C: 0057EC20 003F6238 003F6210 003F56EC     print::MsgWin
+```
+
+The typeinfo pointers match the computed values as well. So this confirms both
+the vtable addresses **and** that `code.bin` is based at `0x00100000`.
+
+### An off-by-4 that would have sunk the scan
+
+Reading a little either side settled the exact layout:
+
+```
+0x005970F8  00000000   offset-to-top
+0x005970FC  0057DB64   typeinfo
+0x00597100  00332610   fn0      <-- what an object actually stores
+```
+
+Canonical Itanium ABI. **The vptr in an object points at the first virtual
+function, not at the start of the vtable.** The addresses first recorded were
+the typeinfo slots; scanning the heap for those would have matched nothing at
+all, and the natural conclusion would have been that the whole approach was
+wrong rather than that the address was four bytes off.
+
+`addresses.cpp` now holds the vptr values (typeinfo + 4) and says why.
+`find_vtables.py` reports the vptr alongside the vtable.
+
+### Confidence now
+
+| Claim | Status |
+| --- | --- |
+| `code.bin` is based at `0x00100000` | **verified in a running game** |
+| The nine vtables are at the recorded addresses | **verified in a running game** |
+| Objects store vptr = typeinfo + 4 | **verified** (ABI layout read directly) |
+| Scanning finds a live `TalkWindow` | not yet -- needs a message box on screen |
+| Any of this holds for ORAS | not investigated; no ORAS executable |

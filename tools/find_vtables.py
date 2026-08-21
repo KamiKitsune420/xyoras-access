@@ -143,7 +143,13 @@ def analyse(data, base, name):
                         f"   first fns " + " ".join(f"{f:08X}" for f in fns[:3]))
                 if verdict == "vtable":
                     good, total, samples = verify_vtable(data, base, vt_va)
-                    line += (f"\n        prologues {good}/{total}  "
+                    # An object stores the address of the FIRST VIRTUAL
+                    # FUNCTION, not the start of the vtable. The Itanium ABI
+                    # lays it out as [offset-to-top][typeinfo][fn0...] and the
+                    # vptr points at fn0 -- one word past the typeinfo we
+                    # matched on. Scanning for the wrong one finds nothing.
+                    line += (f"\n        vptr in objects: 0x{vt_va + 4:08X}"
+                             f"   prologues {good}/{total}  "
                              + " ".join(samples))
                 print(line)
 

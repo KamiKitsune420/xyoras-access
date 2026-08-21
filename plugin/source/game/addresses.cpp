@@ -96,40 +96,53 @@ namespace xyoras { namespace game { namespace addr {
     // usable two ways: scan the heap for one to find the live object, or hook
     // a virtual function to intercept the call.
     //
-    // ALL UNVERIFIED. Derived by static analysis of Pokemon X and corroborated
-    // only by their own internal consistency (the gfl::str::* vtables cluster,
-    // as do the app::tool::* ones, and their virtual functions likewise). None
-    // has been confirmed against a running game. The ORAS column is zero
-    // because no ORAS executable has been analysed.
+    // VERIFIED IN A RUNNING GAME (Pokemon X, under Azahar): reading these
+    // addresses in the live process returns exactly the bytes static analysis
+    // predicted, which confirms both the addresses and that code.bin is based
+    // at 0x00100000. What is NOT yet confirmed is that scanning for one finds
+    // a live object -- that needs a message box on screen.
+    //
+    // These are the values an object stores in its first word, i.e. the
+    // address of the FIRST VIRTUAL FUNCTION. The Itanium ABI lays a vtable out
+    // as [offset-to-top][typeinfo][fn0]... and the vptr points at fn0, not at
+    // the start. Verified directly:
+    //
+    //     0x005970F8  00000000   offset-to-top
+    //     0x005970FC  0057DB64   typeinfo
+    //     0x00597100  00332610   fn0   <-- what a TalkWindow contains
+    //
+    // Scanning for the typeinfo slot instead would find nothing at all.
+    //
+    // The ORAS column is zero because no ORAS executable has been analysed.
     // -------------------------------------------------------------------------
 
     /// gfl::str::StrBuf -- a formatted string. The likeliest place to read
     /// dialogue text after the game applies its own substitutions.
-    const AddrPair kVtStrBuf       = { 0x0059856C, 0 };
+    const AddrPair kVtStrBuf       = { 0x00598570, 0 };
 
     /// gfl::str::MsgData -- the message archive loader.
-    const AddrPair kVtMsgData      = { 0x005985B0, 0 };
+    const AddrPair kVtMsgData      = { 0x005985B4, 0 };
 
     /// gfl::str::StrWin
-    const AddrPair kVtStrWin       = { 0x0059857C, 0 };
+    const AddrPair kVtStrWin       = { 0x00598580, 0 };
 
     /// app::tool::TalkWindow -- the dialogue box itself.
-    const AddrPair kVtTalkWindow   = { 0x005970FC, 0 };
+    const AddrPair kVtTalkWindow   = { 0x00597100, 0 };
 
     /// app::tool::TalkWindowGra
-    const AddrPair kVtTalkWindowGra = { 0x00597284, 0 };
+    const AddrPair kVtTalkWindowGra = { 0x00597288, 0 };
 
     /// app::tool::MsgCursor -- the advance-text cursor.
-    const AddrPair kVtMsgCursor    = { 0x005974C4, 0 };
+    const AddrPair kVtMsgCursor    = { 0x005974C8, 0 };
 
     /// app::tool::MenuWindow
-    const AddrPair kVtMenuWindow   = { 0x005970DC, 0 };
+    const AddrPair kVtMenuWindow   = { 0x005970E0, 0 };
 
     /// app::tool::MenuWindowSystem
-    const AddrPair kVtMenuWindowSystem = { 0x00597334, 0 };
+    const AddrPair kVtMenuWindowSystem = { 0x00597338, 0 };
 
     /// print::MsgWin
-    const AddrPair kVtMsgWin       = { 0x00599A5C, 0 };
+    const AddrPair kVtMsgWin       = { 0x00599A60, 0 };
 
     // -------------------------------------------------------------------------
     // Not yet found — the work of Phase 2
