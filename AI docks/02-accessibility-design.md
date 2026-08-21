@@ -130,6 +130,7 @@ press a key. The modifier is configurable.
 | Mod + `R` | Battle status |
 | Mod + `Start` | Open the mod's settings menu (CTRPF menu) |
 | Mod + `Select` | Toggle verbosity (terse / verbose) |
+| Mod + `X` | *Temporary:* layout snapshot to the trace file, while the marker exists |
 
 Reading the screen has no partner key because there is no button left to give
 it, and it is the command a player reaches for most. Tapping the modifier and
