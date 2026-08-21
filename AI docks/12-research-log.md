@@ -1293,3 +1293,64 @@ window) or field dialogue uses a different class inside `DllField.cro`.
 
 **Standing caveats:** everything here is Pokemon X under emulation. Nothing has
 been checked on hardware, and nothing at all has been checked for ORAS.
+
+---
+
+## 2026-08-21 — On-screen text read from the running game. Phase 2's goal met.
+
+Text displayed by Pokemon X, read out of the live console memory:
+
+```
+"Your name?"                   name-entry prompt
+"Delete"   "Space"             keyboard buttons
+"SAVE"     "OPTIONS"           menu entries
+"You got a message on you"     message-box content (cut at 24 chars by the reader)
+```
+
+### The complete chain
+
+1. **RTTI name -> vtable.** Gen 6 ships type names; the ARM C++ ABI links each
+   to its typeinfo and vtable (`tools/find_vtables.py`).
+2. **vptr = vtable + 4.** An object stores the address of the first virtual
+   function, not the start of the vtable.
+3. **Scan the heap for that vptr** to find live instances. `nw::lyt::TextBox`
+   is `0x00596148`.
+4. **Read the pointer at object + 0xD4** -- the UTF-16 string.
+5. **Decode.**
+
+Every step is verified in a running game. None of it needs a disassembler, and
+none of it needs a fixed pointer chain.
+
+### Why +0xD4, and why it was nearly missed
+
+`nw::lyt::TextBox` derives from `nw::lyt::Pane`, whose name, transform, size
+and child/parent links fill everything before it. A search limited to the first
+0xA0 bytes of the object found nothing at all; widening past the base class
+found the pointer immediately. The offset held on every screen observed.
+
+### Corrections this supersedes
+
+- `gfl::str::StrBuf` is **not** where displayed text lives. It is a pool of
+  formatting buffers, 42-59 of them alive at any moment and essentially always
+  empty.
+- `app::tool::TalkWindow` never appeared in a scan, even in the overworld. It
+  may be constructed only while a message is open, or field dialogue may use
+  another class entirely. Either way it is no longer needed: `TextBox` carries
+  the text regardless of which subsystem drew it.
+
+### What this means for the mod
+
+Reading dialogue no longer needs a hook into the render path. The plugin can:
+
+- scan for `TextBox` instances (the existing `vtscan.hpp`, already tested),
+- read `+0xD4` and decode UTF-16,
+- diff against what was last spoken and speak the difference.
+
+That covers dialogue, menus and any other layout text in one mechanism, because
+all of it is drawn through the same class. It also sidesteps the CRO problem
+completely: `nw::lyt` is in `code.bin`, so the address does not move.
+
+**Caveats.** Pokemon X only, under emulation, with the addresses being XY's.
+Nothing checked on hardware; nothing at all checked for ORAS. A full-heap scan
+is far too slow to run per frame, so a real implementation needs to find the
+objects once and then poll them, or narrow the scan considerably.

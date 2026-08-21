@@ -144,6 +144,28 @@ namespace xyoras { namespace game { namespace addr {
     /// print::MsgWin
     const AddrPair kVtMsgWin       = { 0x00599A60, 0 };
 
+    /// nw::lyt::TextBox -- the NintendoWare layout text pane. THIS is where
+    /// on-screen text actually lives, not gfl::str::StrBuf (which turns out to
+    /// be a pool of mostly-empty formatting buffers).
+    ///
+    /// Live instance counts track the screen exactly: 0 during a transition,
+    /// 155 on a text-heavy setup screen, 21 on a sparse one.
+    const AddrPair kVtTextBox      = { 0x00596148, 0 };
+
+    /// nw::lyt::Pane -- layout panes generally.
+    const AddrPair kVtPane         = { 0x00595F24, 0 };
+
+    /// Offset within a TextBox of the pointer to its UTF-16 string.
+    ///
+    /// VERIFIED in a running game: reading it yields the actual displayed
+    /// text -- "Your name?", "Delete", "Space", "SAVE", and message-box
+    /// content. Stable at this offset across every screen observed.
+    ///
+    /// TextBox derives from nw::lyt::Pane, whose name, transform, size and
+    /// child links occupy everything before it -- which is why a search
+    /// limited to the first 0xA0 bytes found nothing.
+    const u32 kTextBoxStringOffset = 0xD4;
+
     // -------------------------------------------------------------------------
     // Not yet found — the work of Phase 2
     //
