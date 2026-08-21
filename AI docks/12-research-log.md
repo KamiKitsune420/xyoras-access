@@ -973,3 +973,113 @@ the moment a save with Pokemon exists, and it needs no console.
 **Standing gap:** PK6 remains verified by round-trip and by conformance to
 PKHeX's documented algorithm, not against real encrypted data. Worth closing
 when possible.
+
+---
+
+## 2026-08-21 — RTTI survives, and it names the message system
+
+**This is the Phase 2 foothold.** Gen 6 ships with C++ RTTI intact, so every
+polymorphic class leaves its type name in the binary. Extracting them gives a
+partial map of the game's architecture, and the ABI lets each name be followed
+back to its vtable.
+
+### Method
+
+1. Extracted RomFS (653 files) with another env-gated Azahar hook,
+   `XYORAS_DUMP_ROMFS`, which calls the loader's existing `DumpRomFS`.
+2. Wrote `tools/cro_symbols.py` to parse CRO headers per Citra's
+   `cro_helper.h`.
+3. Mined `code.bin` for RTTI type names and grouped them by namespace.
+4. Wrote `tools/find_vtables.py` to walk name -> typeinfo -> vtable.
+
+### 1730 RTTI type names, by namespace
+
+| Namespace | Count | What it is |
+| --- | --- | --- |
+| `nn` | 864 | Nintendo SDK |
+| `nw` | 175 | NintendoWare |
+| `gfl` | 162 | **Game Freak library** |
+| `gflnet` | 84 | Game Freak networking |
+| `app` | 69 | **Application/UI layer** |
+| `field` | 67 | **Overworld** |
+| `xy_system` | 65 | **XY-specific systems** |
+| `savedata` | 57 | **Save structures** |
+| `pml` | 16 | Pokemon library |
+| `battleinst` | 7 | Battle instance |
+| `poke_tool` | 6 | Pokemon utilities |
+
+### The message system, by name
+
+```
+app::tool::TalkWindow          the dialogue box
+app::tool::TalkWindowGra
+app::tool::TalkCursorWindow
+app::tool::MsgCursor
+app::tool::MenuWindow / Controller / Drawer / System
+gfl::str::MsgData              message archive loader
+gfl::str::StrBuf               a formatted string
+gfl::str::StrWin
+print::MsgWin
+field::GameOverMessage
+```
+
+`gfl::str::StrBuf` is the most interesting: a formatted string object, which is
+what the message box must be handed *after* substitutions (player name, Pokemon
+nicknames) are applied. That is exactly the text we want to speak.
+
+### Candidate vtable addresses (XY, `code.bin` base `0x00100000`)
+
+| Class | vtable | first virtual fns |
+| --- | --- | --- |
+| `gfl::str::StrBuf` | `0x0059856C` | `0012AD4C` `0038E5B8` |
+| `gfl::str::MsgData` | `0x005985B0` | `0038FC20` `0038FBC4` |
+| `gfl::str::StrWin` | `0x0059857C` | `0038FA7C` `0038FA34` |
+| `app::tool::TalkWindow` | `0x005970FC` | `00332610` `003325CC` |
+| `app::tool::TalkWindowGra` | `0x00597284` | `00337644` `00337640` |
+| `app::tool::MsgCursor` | `0x005974C4` | `00345810` `0034580C` |
+| `app::tool::MenuWindow` | `0x005970DC` | `00331364` `003312F4` |
+| `app::tool::MenuWindowSystem` | `0x00597334` | `0033A924` `0033A914` |
+| `print::MsgWin` | `0x00599A5C` | `003F6238` `003F6210` |
+
+**Marked UNVERIFIED.** The method is sound and the results corroborate each
+other -- `gfl::str::*` vtables cluster at `0x00598xxx`, `app::tool::*` at
+`0x00597xxx`, and their virtual functions cluster equally tightly
+(`app::tool` around `0x0033xxxx`, `gfl::str` around `0x0038xxxx`). That is the
+shape of a real `.rodata` vtable section. But none of it has been confirmed
+against a running game.
+
+The load base assumption gets independent support: `code.bin` spans
+`0x00100000` to about `0x005EB000`, and Azahar logs the first CRO loading at
+`0x006A5000` -- immediately above, exactly where it should be.
+
+### Why this changes the plan
+
+The earlier worry was that the message system lived in a relocated CRO and so
+had no fixed address. **It does not.** `app::tool::TalkWindow` and
+`gfl::str::StrBuf` are compiled into `code.bin`, which loads at a constant
+base. `DllDialogCommon.cro` turns out to be a 12 KB shim, not the renderer.
+
+So a vtable pointer is a fixed, recognisable value, and that gives two
+practical techniques neither of which needs a disassembler:
+
+1. **Find live objects by scanning** for a pointer to a known vtable. That
+   locates the active `TalkWindow` or `StrBuf` without mapping any pointer
+   chain by hand.
+2. **Hook a virtual function** by its address, which is the message render
+   path we have been looking for.
+
+### Also worth recording
+
+- CRO symbol tables are useless for this: every module exports exactly one
+  symbol (`nnroControlObject_`) and has **zero** named imports. Modules resolve
+  each other by index.
+- `static.crs` has 461 named exports, but 460 are Rogue Wave STL. The only
+  Game Freak symbol exported to modules is
+  `_ZN9xy_system2bg6System13SetIsCallDrawEb`
+  (`xy_system::bg::System::SetIsCallDraw(bool)`).
+- Module sizes are lopsided: `DllField` is 1.1 MB of code importing from 30
+  modules, `DllBattle` 900 KB, and most others are tiny.
+
+**Next:** confirm a vtable by finding a live object. The plugin can scan the
+heap for a pointer to `0x005970FC` while a message box is on screen; a hit
+proves the address and hands us the object in one step.
