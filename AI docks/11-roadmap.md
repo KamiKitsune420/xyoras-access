@@ -33,7 +33,7 @@ The riskiest work, done first: prove on-console speech is viable.
 | --- | --- | --- |
 | 1.1 | Link eSpeak into the plugin; synthesise to a PCM buffer | DONE |
 | 1.2 | Wrap PCM16 in an in-memory BCWAV header | DONE |
-| 1.3 | Play it via libcwav on CSND | DONE (accepted by CSND; audibility unverified) |
+| 1.3 | Play it via libcwav on CSND | DONE (verified byte-identical at CSND) |
 | 1.4 | Speak a startup banner when the game boots | DONE (written to WAV; audible playback untested) |
 | 1.5 | Measure end-to-end latency on New 3DS and Old 3DS | TODO (17x realtime under emulation; needs hardware) |
 | 1.6 | Handle APT events (sleep, HOME suspend) correctly | DONE (ncsndInit auto-hook; untested) |
@@ -44,10 +44,11 @@ audio, in under 150 ms, without disturbing the game.
 
 Status: the entire pipeline is now implemented, and everything an emulator can
 check has been checked — eSpeak runs on ARM11, finds its data, and synthesises correct PCM
-at ~17x realtime. libcwav accepts our BCWAV, acquires a CSND channel, and issues command
-batches the emulator parses with zero unrecognised commands. The single
-remaining unknown is whether it *sounds* right, which no emulator can answer —
-none implements CSND audio output.
+at ~17x realtime. The audio reaching CSND is **byte-for-byte identical** to what eSpeak produced
+— 71473 of 71473 samples — confirmed by patching CSND output into Azahar
+(`tools/azahar-csnd-patch/`). The physical address matches from both ends
+independently. Everything from text to the audio hardware's doorstep is
+verified; only the DAC itself remains, which needs a console.
 
 If 1.5 fails badly on Old 3DS, apply the mitigations in
 `06-tts-audio-pipeline.md` before continuing — everything downstream depends on
