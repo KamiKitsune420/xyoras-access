@@ -7,6 +7,7 @@
  * game down with it, and a blind player cannot read the exception screen.
  */
 #include "xyoras/game.hpp"
+#include "xyoras/memchain.hpp"
 
 namespace xyoras { namespace game {
 
@@ -14,7 +15,9 @@ using CTRPluginFramework::Process;
 
 bool InHeap(u32 address)
 {
-    return address >= kHeapMin && address < kHeapMax;
+    // Delegates to the shared guard so the plugin and the host tests agree by
+    // construction rather than by two copies happening to match.
+    return mem::InHeap(address);
 }
 
 namespace {
@@ -78,22 +81,20 @@ bool ReadPtr(u32 address, u32 &out)
     return true;
 }
 
+namespace {
+    /// Adapts our guarded Read32 to the reader signature mem::WalkChain wants.
+    bool ChainRead32(u32 address, u32 &out, void * /*ctx*/)
+    {
+        return Read32(address, out);
+    }
+}
+
 bool ReadChain(u32 base, const u32 *offsets, u32 count, u32 &out)
 {
-    if (offsets == nullptr)
-        return false;
-
-    u32 cursor = base;
-    for (u32 i = 0; i < count; ++i)
-    {
-        u32 next = 0;
-        if (!ReadPtr(cursor, next))
-            return false;
-        cursor = next + offsets[i];
-    }
-
-    out = cursor;
-    return InHeap(out);
+    // The walking policy -- range checks at every link, overflow rejection,
+    // clean failure halfway -- lives in memchain.hpp and is covered by
+    // tools/host-test/test_memchain.cpp. Only the reader is supplied here.
+    return mem::WalkChain(ChainRead32, nullptr, base, offsets, count, out);
 }
 
 bool ReadUtf16(u32 address, u32 maxChars, std::string &out)
