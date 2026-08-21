@@ -65,11 +65,17 @@ speech being usable.
 | 2.5 | PK6 decrypt + unshuffle + field accessors | DONE (round-trip verified; not yet against real data) |
 | 2.6 | Generated name tables (species, moves, items, abilities) | DONE |
 | 2.7 | Find player coordinates and map ID | TODO |
-| 2.8 | Find the message-box render path and hook it | TODO |
+| 2.8 | Read dialogue text | DONE via a different route: no render hook needed |
 | 2.9 | Find menu cursor state | TODO |
 
-2.8 is the highest-value unknown in the project, and it is harder than first
-thought: the message system lives in `DllDialogCommon.cro`, a module loaded and
+**2.8 is solved, and not the way it was framed.** No render hook is needed at
+all. Gen 6 ships RTTI, so `nw::lyt::TextBox` can be found by scanning the heap
+for its vptr, and its UTF-16 string sits at `+0xD4`. Verified by reading real
+text out of a running game -- "Your name?", "SAVE", and message-box content.
+The same mechanism covers dialogue, menus and every other layout text, because
+all of it is drawn through that one class. Details in `12-research-log.md`.
+
+The original framing, kept because it explains the detour: the message system lives in `DllDialogCommon.cro`, a module loaded and
 relocated at runtime, not at a fixed address in `code.bin`. See
 `04-gen6-reverse-engineering.md`. Two approaches are already ruled out --
 CRO export tables carry no named functions, and the module is not even loaded
