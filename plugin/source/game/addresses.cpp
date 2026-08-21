@@ -155,6 +155,48 @@ namespace xyoras { namespace game { namespace addr {
     /// nw::lyt::Pane -- layout panes generally.
     const AddrPair kVtPane         = { 0x00595F24, 0 };
 
+    // -------------------------------------------------------------------------
+    // Pane geometry, within an nw::lyt::Pane
+    //
+    // Found by dumping the 0xD4 bytes before the string pointer for every pane
+    // on the language-selection screen of Pokemon X, and looking for the field
+    // that moves down a list whose order is visible on screen. See
+    // "AI docks/12-research-log.md".
+    //
+    // Words 0x80 through 0xAF form a 3x4 row-major matrix. Every pane observed
+    // held an identity rotation, which makes the translation column easy to
+    // read off:
+    //
+    //   +0x80  1.0   0.0   0.0   [+0x8C  tx]
+    //   +0x90  0.0   1.0   0.0   [+0x9C  ty]
+    //   +0xA0  0.0   0.0   1.0   [+0xAC  tz]
+    // -------------------------------------------------------------------------
+
+    /// Vertical position of a pane.
+    ///
+    /// VERIFIED on Pokemon X version 0. Down the language list it read
+    /// 15, 0, -10, -40, -70, -100, -130, -160, -190 -- matching the on-screen
+    /// order exactly, at an even 30-unit spacing for the seven language rows.
+    /// Larger is higher on the screen.
+    const u32 kPaneTranslateY = 0x9C;
+
+    /// Horizontal position. UNVERIFIED: every pane on the only screen examined
+    /// sat at tx = 0, so its position in the matrix is inferred from ty, not
+    /// confirmed. A screen with items side by side would settle it.
+    const u32 kPaneTranslateX = 0x8C;
+
+    /// Depth. UNVERIFIED, and there is something to explain here: visible panes
+    /// read -1.0, while three panes that appeared to be duplicates or offscreen
+    /// read 0.0. That may be how a pane not in the visible tree is marked, but
+    /// one screen is not evidence, and it has not been checked.
+    const u32 kPaneTranslateZ = 0xAC;
+
+    /// Width and height, as two floats. UNVERIFIED but strongly suggested:
+    /// the instruction pane read 290 x 200 and every single-line label read
+    /// 290 x 20, which are plausible sizes in 3DS layout units.
+    const u32 kPaneSizeW = 0x48;
+    const u32 kPaneSizeH = 0x4C;
+
     // The offset of the string pointer within a TextBox (+0xD4) is NOT here.
     // It is a structure offset rather than an address, it is the same for
     // every series, and the code that uses it -- textbox.hpp -- must stay free

@@ -1568,3 +1568,67 @@ format is not documented here, and decoding it properly is the real fix.
 
 Accented letters fold to their base letter (`Hungría` → `Hungria`) rather than
 being dropped; typographic quotes, dashes and ellipses fold to ASCII.
+
+---
+
+## 2026-08-21 — Where a pane sits on screen
+
+Read-screen reports panes in heap-address order, which is allocation order and
+has nothing to do with the screen. A menu read out in allocation order is
+confusing rather than useful, so the pane's position had to be found.
+
+It did not need the emulator. The plugin dumped the 0xD4 bytes preceding the
+string pointer for every pane on the language-selection screen, straight into
+the narration trace, and the answer was visible by eye: **one column moved down
+the list in the order the player sees.**
+
+| Pane | `+0x9C` |
+| --- | --- |
+| "Play Pokemon X in" | 15.0 |
+| (instruction text) | 0.0 |
+| English | -10.0 |
+| Spanish | -40.0 |
+| French | -70.0 |
+| German | -100.0 |
+| Italian | -130.0 |
+| Japanese | -160.0 |
+| Korean | -190.0 |
+
+Seven language rows at an even 30-unit spacing, in exactly the on-screen order.
+Larger is higher.
+
+The words around it form a 3x4 row-major matrix at `+0x80`, with an identity
+rotation on every pane observed:
+
+```
+  +0x80  1.0   0.0   0.0   [+0x8C  tx]
+  +0x90  0.0   1.0   0.0   [+0x9C  ty]
+  +0xA0  0.0   0.0   1.0   [+0xAC  tz]
+```
+
+**Only `ty` is verified.** Every pane on this screen sat at `tx = 0`, so the
+horizontal offset is inferred from the matrix shape rather than confirmed; a
+screen with items side by side would settle it. `+0x48`/`+0x4C` are almost
+certainly width and height — the instruction pane read 290 x 200 and every
+single-line label read 290 x 20 — but that is a strong hint, not a measurement.
+
+### Why reading order is NOT sorted by this yet
+
+Sorting the read-screen output by `ty` looks like the obvious next step, and it
+is wrong until one more thing is known: **which screen a pane is on.** The 3DS
+has two, each with its own layout root and its own coordinate space, and
+"Select language" is plausibly the bottom-screen title rather than something
+below the language list. Sorting all panes together by `ty` would interleave the
+two screens and produce an order that is worse than allocation order, because it
+would look deliberate.
+
+`tz` may be the discriminator — visible panes read -1.0, while three panes that
+looked like duplicates or leftovers read 0.0 — but one screen is not evidence.
+The next step is to dump a screen where the two displays hold obviously
+different content and see what separates them.
+
+### The dump stays
+
+`DumpPaneLayout` in `narrate.cpp` runs once, only with the trace marker
+present, and writes the raw words beside the text they belong to. It is how
+this offset was found and it is how the next one will be.

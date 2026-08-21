@@ -100,6 +100,15 @@ namespace {
     /// a game process is worth avoiding.
     u32 g_scanBuffer[vtscan::kPageSize / 4];
 
+    std::string Hex32(u32 value)
+    {
+        static const char kDigits[] = "0123456789ABCDEF";
+        std::string out(8, '0');
+        for (u32 i = 0; i < 8; ++i)
+            out[7 - i] = kDigits[(value >> (i * 4)) & 0xF];
+        return out;
+    }
+
     /// The ARM11 system tick runs at 268.111856 MHz. Dividing by 268111 gives
     /// milliseconds closely enough for a cost that is being measured in tens
     /// of them.
@@ -181,6 +190,61 @@ namespace {
         return read;
     }
 
+    /// One-shot hex dump of what a TextBox holds before its string pointer.
+    ///
+    /// Read-screen currently reports panes in heap-address order, which is
+    /// allocation order and has nothing to do with where they are on screen.
+    /// A menu read out in allocation order is confusing rather than useful.
+    ///
+    /// TextBox derives from nw::lyt::Pane, and a Pane carries a transform --
+    /// so its screen position is somewhere in the 0xD4 bytes before the string
+    /// pointer we already read. This dumps them alongside the text, so the
+    /// offset can be identified by looking for the field that varies down a
+    /// list the player can see the order of. Once found it goes in the address
+    /// table and this goes away.
+    ///
+    /// Only ever runs once, and only with tracing on.
+    void DumpPaneLayout(const std::vector<narration::Observation> &observed)
+    {
+        if (!diag::IsNarrationTraceRequested())
+            return;
+
+        static bool dumped = false;
+        if (dumped)
+            return;
+        dumped = true;
+
+        // More than a handful is unreadable and the file gets large.
+        const u32 kMaxPanesToDump = 16;
+        const u32 count = observed.size() < kMaxPanesToDump
+                              ? static_cast<u32>(observed.size())
+                              : kMaxPanesToDump;
+
+        diag::NarrationTrace("layout dump: first " + std::to_string(count) +
+                             " panes, words 0x00 to 0xD0");
+
+        for (u32 i = 0; i < count; ++i)
+        {
+            diag::NarrationTrace("pane " + Hex32(observed[i].id) + "  \"" +
+                                 observed[i].text + "\"");
+
+            // Eight words a line, labelled with the offset, so a column can be
+            // followed down the panes by eye.
+            for (u32 base = 0; base < textbox::kStringOffset; base += 32)
+            {
+                std::string line = "  +" + Hex32(base).substr(6) + ":";
+                for (u32 w = 0; w < 8 && base + w * 4 < textbox::kStringOffset; ++w)
+                {
+                    u32 value = 0;
+                    line += " ";
+                    line += game::Read32(observed[i].id + base + w * 4, value)
+                                ? Hex32(value) : "--------";
+                }
+                diag::NarrationTrace(line);
+            }
+        }
+    }
+
     /// Speak everything on screen, because the player asked for it.
     void DoReadScreen(const std::vector<narration::Observation> &observed)
     {
@@ -256,6 +320,8 @@ namespace {
                                  " panes read");
             for (u32 i = 0; i < observed.size(); ++i)
                 diag::NarrationTrace("  . " + observed[i].text);
+
+            DumpPaneLayout(observed);
         }
 
         for (u32 i = 0; i < toSpeak.size(); ++i)
