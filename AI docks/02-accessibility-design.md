@@ -144,6 +144,25 @@ Persisted to SD card as a plain-text config the player can also edit from a PC.
 - Modifier key choice.
 - Auto-announce map changes on/off.
 
+## Wording decisions already made
+
+All wording lives in `plugin/include/xyoras/phrases.hpp` and is pinned by
+`tools/host-test/test_phrases.cpp`, so changing what the player hears requires
+changing a test -- deliberately.
+
+| Decision | Why |
+| --- | --- |
+| One HP left reads as "1 percent", never "0" | "0 percent" tells the player they fainted when they did not |
+| 154 of 155 reads as "99 percent", never "100" | Rounding up hides chip damage |
+| A fainted Pokemon says "fainted", not "0 of 155" | The fact, not a number to interpret |
+| A fainted Pokemon's status is not mentioned | It no longer matters |
+| Own HP exact, opponent's as a percentage | A percentage is all a sighted player is shown; exact values would breach rule 2 |
+| A nickname alone when terse; nickname then species above that | The player chose the nickname, but an unfamiliar one still needs identifying |
+| A null or empty menu entry says "blank" | Silence reads as the mod having broken |
+| An empty tile ahead says "clear" | Same reason |
+| The facing scan is terse by default | It is spoken constantly; every extra word costs time |
+| Coordinates are verbose-only | Speaking them by default is noise |
+
 ## Anti-patterns to avoid
 
 - Speaking the same text twice because two subsystems both noticed a change.

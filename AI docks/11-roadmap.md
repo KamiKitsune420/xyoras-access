@@ -60,16 +60,20 @@ speech being usable.
 | --- | --- | --- |
 | 2.1 | Title ID + update version detection, series dispatch | TODO |
 | 2.2 | Address table with verification metadata | TODO |
-| 2.3 | Guarded memory read helpers and pointer walking | TODO |
+| 2.3 | Guarded memory read helpers and pointer walking | DONE |
 | 2.4 | Re-verify inherited community offsets on target versions | TODO |
-| 2.5 | PK6 decrypt + unshuffle + field accessors | TODO |
-| 2.6 | Generated name tables (species, moves, items, abilities) | TODO |
+| 2.5 | PK6 decrypt + unshuffle + field accessors | DONE (round-trip verified; not yet against real data) |
+| 2.6 | Generated name tables (species, moves, items, abilities) | DONE |
 | 2.7 | Find player coordinates and map ID | TODO |
 | 2.8 | Find the message-box render path and hook it | TODO |
 | 2.9 | Find menu cursor state | TODO |
 
-2.8 is the highest-value unknown in the project. See
-`04-gen6-reverse-engineering.md`.
+2.8 is the highest-value unknown in the project, and it is harder than first
+thought: the message system lives in `DllDialogCommon.cro`, a module loaded and
+relocated at runtime, not at a fixed address in `code.bin`. See
+`04-gen6-reverse-engineering.md`. Two approaches are already ruled out --
+CRO export tables carry no named functions, and the module is not even loaded
+at the title screen.
 
 **Exit criterion:** the plugin can report, on demand, the player's coordinates,
 map, party contents, and the last message the game displayed.
