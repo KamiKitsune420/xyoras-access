@@ -214,30 +214,20 @@ namespace {
         if (!diag::IsNarrationTraceRequested())
             return;
 
-        // Sample the screen a few times, spaced out, rather than once. Two
-        // open questions both need more than one sample: what separates the
-        // top screen from the bottom, and what marks the selected item. The
-        // second only shows up by comparing the same screen with the
-        // selection in different places.
-        // An explicit request is never rate-limited: the player is standing
-        // on the screen they want captured, and refusing them would be
-        // baffling.
-        static u32 dumps = 0;
-        static u32 sinceDump = 0;
-
+        // Only ever on request.
+        //
+        // This used to sample automatically every few seconds, and that
+        // distorted the very thing it was measuring. Each dump writes a few
+        // hundred lines through a file that is opened and closed per line, and
+        // probes four classes over the whole heap. In a real play session it
+        // starved the poll loop badly enough that only eight scans happened at
+        // all -- which is how a stale cache went unnoticed for the whole
+        // session. A diagnostic that changes the behaviour under test is worse
+        // than no diagnostic.
         if (!requested)
-        {
-            if (dumps >= 4)
-                return;
-            if (dumps > 0 && ++sinceDump < 90)
-                return;             // roughly every few seconds
-            sinceDump = 0;
-            ++dumps;
-        }
-        else
-        {
-            diag::NarrationTrace("--- snapshot requested by the player ---");
-        }
+            return;
+
+        diag::NarrationTrace("--- snapshot requested ---");
 
         // More than a handful is unreadable and the file gets large.
         const u32 kMaxPanesToDump = 16;

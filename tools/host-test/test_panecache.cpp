@@ -218,41 +218,86 @@ namespace {
         test::Check(start < end, "and is not inverted");
     }
 
-    void TestFullScanForcedPeriodically(void)
+    void TestFullScanForcedByElapsedPolls(void)
     {
-        test::Section("going wide again now and then");
+        test::Section("going wide again on a clock, not a scan count");
 
-        // A narrow scan cannot see panes allocated outside its window. Without
-        // this the mod would go permanently blind to part of the heap.
+        // This is the bug that lost a whole play session. The rule used to be
+        // "one full scan every ten narrow ones", which sounds equivalent to a
+        // clock and is not: scans turned out to be rare, so a full one never
+        // came around, and the mod read a ghost of the first screen while the
+        // player moved through the game.
         panecache::Cache c;
         c.SetPanes(MakePanes(10), false);
 
         u32 start = 0, end = 0;
-        for (u32 i = 0; i < panecache::kNarrowScansBeforeFull; ++i)
-        {
-            test::Check(c.NarrowScanRange(start, end),
-                        i == 0 ? "narrow scans are offered" : "");
-            c.SetPanes(MakePanes(10), true);
-        }
+        test::Check(c.NarrowScanRange(start, end), "narrow scans are offered at first");
 
+        // Narrow scans alone must NOT hold off the full scan, however many of
+        // them happen.
+        for (u32 i = 0; i < 100; ++i)
+            c.SetPanes(MakePanes(10), true);
+        test::Check(c.NarrowScanRange(start, end),
+                    "a hundred narrow scans do not by themselves force a full one");
+
+        // Elapsed polls do.
+        for (u32 i = 0; i < panecache::kPollsBetweenFullScans; ++i)
+            c.NotePollResult(10);
         test::Check(!c.NarrowScanRange(start, end),
-                    "after enough narrow scans, a full one is required");
+                    "but enough elapsed polls require a full scan");
     }
 
-    void TestFullScanResetsTheNarrowCount(void)
+    void TestFullScanResetsTheClock(void)
     {
-        test::Section("a full scan starts the count over");
+        test::Section("a full scan starts the clock over");
 
         panecache::Cache c;
         c.SetPanes(MakePanes(10), false);
 
         u32 start = 0, end = 0;
-        for (u32 i = 0; i < panecache::kNarrowScansBeforeFull; ++i)
-            c.SetPanes(MakePanes(10), true);
+        for (u32 i = 0; i < panecache::kPollsBetweenFullScans; ++i)
+            c.NotePollResult(10);
         test::Check(!c.NarrowScanRange(start, end), "a full scan is due");
 
         c.SetPanes(MakePanes(10), false);
         test::Check(c.NarrowScanRange(start, end), "and narrow scans resume after it");
+
+        // A narrow scan must not reset it, or the clock could be held off
+        // forever by exactly the scans it is meant to interrupt.
+        for (u32 i = 0; i < panecache::kPollsBetweenFullScans; ++i)
+        {
+            c.NotePollResult(10);
+            c.SetPanes(MakePanes(10), true);
+        }
+        test::Check(!c.NarrowScanRange(start, end),
+                    "and a narrow scan does not reset the clock");
+    }
+
+    void TestGhostPanesAreBounded(void)
+    {
+        test::Section("panes that were freed but still read");
+
+        // The failure that made this matter: freed memory is not wiped, so a
+        // freed TextBox still has its vptr and still points at a string in the
+        // heap. Reading it SUCCEEDS and returns stale text, so the
+        // read-failure staleness check never fires.
+        //
+        // Nothing here can detect that. What this guarantees is that it cannot
+        // last: a full scan is due within a bounded number of polls no matter
+        // how convincingly the ghosts read.
+        panecache::Cache c;
+        c.SetPanes(MakePanes(10), false);
+
+        u32 start = 0, end = 0;
+        u32 polls = 0;
+        while (c.NarrowScanRange(start, end) && polls < 10000)
+        {
+            c.NotePollResult(10);       // every ghost reads perfectly
+            ++polls;
+        }
+
+        test::Check(polls <= panecache::kPollsBetweenFullScans,
+                    "a full scan comes due even when every cached pane reads fine");
     }
 
     void TestEmptyNarrowScanGoesWide(void)
@@ -339,8 +384,9 @@ int main(void)
     TestLearnsWhereThePanesWere();
     TestWindowIsPadded();
     TestWindowClampsToTheHeap();
-    TestFullScanForcedPeriodically();
-    TestFullScanResetsTheNarrowCount();
+    TestFullScanForcedByElapsedPolls();
+    TestFullScanResetsTheClock();
+    TestGhostPanesAreBounded();
     TestEmptyNarrowScanGoesWide();
     TestEmptyFullScanKeepsTrying();
     TestInvalidateKeepsTheWindow();

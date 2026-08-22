@@ -67,10 +67,18 @@ rm -rf "${SD}/speech"
 : > "${SD}/trace-narration"
 : > "${SD}/dump-audio"
 
-# Press A on a slow cycle so the game walks through its own text rather than
-# sitting on one screen. It is not reliable -- see 12-research-log.md -- but it
-# costs nothing.
-export XYORAS_AUTO_PRESS="${XYORAS_AUTO_PRESS:-A}"
+# Press buttons on a slow cycle so the game walks through its own text rather
+# than sitting on one screen with nothing changing for the mod to notice.
+#
+# The names are LOWERCASE and the patched emulator silently ignores anything
+# else -- "A" and "DPadDown" match nothing, which cost several runs that looked
+# like the mod was failing when the game simply never received any input.
+# Accepted: a, b, start, up, down, left, right.
+#
+# A comma-separated list cycles one button per press, because a single repeated
+# button cannot get through a screen that needs a cursor moved and then a
+# confirm.
+export XYORAS_AUTO_PRESS="${XYORAS_AUTO_PRESS:-a}"
 
 log "running for ${RUNTIME}s (auto-pressing ${XYORAS_AUTO_PRESS})"
 "${AZAHAR}" "${ROM}" &

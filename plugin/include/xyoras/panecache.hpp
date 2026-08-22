@@ -43,12 +43,23 @@ namespace xyoras { namespace panecache {
     constexpr u32 kStaleNumerator = 1;
     constexpr u32 kStaleDenominator = 2;   ///< i.e. half
 
-    /// Narrow scans in a row before one full scan is done anyway.
+    /// Polls between forced full scans.
     ///
     /// A narrow scan cannot find panes allocated outside the window it learned,
     /// so the window has to be rebuilt from scratch periodically or the mod
-    /// would go permanently blind to a part of the heap it once ignored.
-    constexpr u32 kNarrowScansBeforeFull = 10;
+    /// goes blind to the part of the heap it once ignored.
+    ///
+    /// This is counted in POLLS, not in scans, and that distinction was learned
+    /// the hard way. Counting scans meant "one full scan every ten narrow
+    /// ones", which sounds equivalent and is not: if scans become rare for any
+    /// reason, recovery becomes rare with them. In a real play session scans
+    /// were rare enough that a full one never came around at all, and the mod
+    /// read a ghost of the first screen for the entire session while the player
+    /// moved through the game.
+    ///
+    /// Counted in polls, recovery is bounded by wall time no matter what else
+    /// is happening.
+    constexpr u32 kPollsBetweenFullScans = 120;   // about two seconds at 60 Hz
 
     /// Slack added to each side of the learned window, so panes allocated just
     /// beside the known ones are still found without a full scan.
@@ -62,7 +73,7 @@ namespace xyoras { namespace panecache {
         Cache()
             : sinceScan_(kRescanInterval), forced_(true),
               windowStart_(0), windowEnd_(0),
-              haveWindow_(false), narrowScans_(0) {}
+              haveWindow_(false), pollsSinceFull_(kPollsBetweenFullScans) {}
 
         /// True when the caller should perform a scan this poll.
         bool NeedsScan() const
@@ -77,7 +88,7 @@ namespace xyoras { namespace panecache {
         /// empty. Returns true and fills the range otherwise.
         bool NarrowScanRange(u32 &start, u32 &end) const
         {
-            if (!haveWindow_ || narrowScans_ >= kNarrowScansBeforeFull)
+            if (!haveWindow_ || pollsSinceFull_ >= kPollsBetweenFullScans)
                 return false;
 
             start = windowStart_;
@@ -100,18 +111,17 @@ namespace xyoras { namespace panecache {
 
             if (narrowed)
             {
-                ++narrowScans_;
                 if (panes_.empty())
                 {
                     // The window is stale. Go wide next time.
-                    haveWindow_  = false;
-                    narrowScans_ = 0;
-                    forced_      = true;
+                    haveWindow_     = false;
+                    pollsSinceFull_ = kPollsBetweenFullScans;
+                    forced_         = true;
                 }
             }
             else
             {
-                narrowScans_ = 0;
+                pollsSinceFull_ = 0;
             }
 
             if (!panes_.empty())
@@ -124,6 +134,8 @@ namespace xyoras { namespace panecache {
         void NotePollResult(u32 succeeded)
         {
             ++sinceScan_;
+            if (pollsSinceFull_ < kPollsBetweenFullScans)
+                ++pollsSinceFull_;
 
             if (panes_.empty())
             {
@@ -152,9 +164,9 @@ namespace xyoras { namespace panecache {
         /// everything. For when the window is no longer to be trusted at all.
         void ForgetWindow()
         {
-            haveWindow_  = false;
-            narrowScans_ = 0;
-            forced_      = true;
+            haveWindow_     = false;
+            pollsSinceFull_ = kPollsBetweenFullScans;
+            forced_         = true;
         }
 
         const std::vector<u32> &Panes() const { return panes_; }
@@ -193,7 +205,7 @@ namespace xyoras { namespace panecache {
         u32  windowStart_;
         u32  windowEnd_;
         bool haveWindow_;
-        u32  narrowScans_;
+        u32  pollsSinceFull_;
     };
 
 }} // namespace xyoras::panecache

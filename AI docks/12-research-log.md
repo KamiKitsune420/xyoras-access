@@ -1759,3 +1759,85 @@ The wider point: the priority levels were being read as "how important is this"
 when `Interrupt` also carries "and destroy what is waiting". Anywhere else that
 reaches for `Interrupt` should be checked against that second meaning — it is
 correct for a player pressing a key, and wrong for anything automatic.
+
+---
+
+## 2026-08-21 — A real play session, and the bug it exposed
+
+The first session with a person actually driving the game, moving through
+screens. **The mod stayed silent the whole time.** The trace says why, and it
+was not the design working as intended:
+
+```
+probe Picture: 124 live     <- first screen
+probe Picture: 124 live
+probe Picture: 124 live
+probe Picture: 291 live     <- a different screen entirely
+scan: 21 panes found        <- the TextBox scan found the same 21. Every time.
+```
+
+Two independent faults, and both were mine.
+
+### Freed panes still read successfully
+
+When the game frees a `TextBox`, the memory is not wiped. The vptr is still
+there, the string pointer still points into the heap. So `textbox::ReadString`
+**succeeds** and returns stale text.
+
+The staleness detector fires when reads *fail*. Reads were not failing. So the
+mod read a ghost of the first screen for the entire session, perfectly happily,
+with nothing changing and therefore nothing to speak.
+
+Nothing in the cache can detect this directly — a freed pane is
+indistinguishable from a live one by reading it. What can be guaranteed is that
+it cannot last.
+
+### Recovery was gated on scan count, not elapsed time
+
+The rule was "one full scan every ten narrow ones". That sounds equivalent to a
+clock and is not: if scans become rare, recovery becomes rare with them. **Only
+eight scans happened in the whole session**, so a full scan never came around.
+
+Now counted in polls (`kPollsBetweenFullScans = 120`, about two seconds), so
+recovery is bounded by wall time no matter what else is going on. A test asserts
+exactly the failure case: every cached pane reading perfectly must still not
+hold off a full scan.
+
+### And the diagnostics caused the scan starvation
+
+Why were scans so rare? The automatic layout dump. Each one writes a few hundred
+lines through a file opened and closed *per line*, then probes four classes over
+the whole heap — and it fired every few seconds.
+
+**A diagnostic that changes the behaviour under test is worse than no
+diagnostic.** Automatic sampling is gone; the dump now happens only when asked
+for, via `Modifier + X`.
+
+## Same session — the speech quality question
+
+Reported as "kinda garbled". Measured rather than guessed at:
+
+| Check | Result |
+| --- | --- |
+| Clipping | none |
+| Sample-to-sample discontinuities | none |
+| DC offset | negligible (+40 of 32767) |
+| Peak / RMS | 85% / ~3200 — healthy |
+| Voice data vs the installed eSpeak NG | **byte-identical sizes**, not truncated |
+| Our ARM build vs host eSpeak, same text | same rate, duration within 1.7%, same levels |
+
+So the pipeline is faithful and the voice data is complete. **The quality is
+eSpeak's own.** `CLAUDE.md` already treats eSpeak as a placeholder "until we
+find a better option", and this is what that means in practice.
+
+Two things worth acting on:
+
+- **`config.txt` is not read by anything.** It ships, it documents rate, pitch,
+  volume, verbosity and the modifier — and nothing loads it. The compiled
+  defaults (200 wpm, pitch 50, voice `en`) are what actually run. Until
+  `config.cpp` exists, the file is decorative, and that is misleading to anyone
+  who edits it.
+- **Voice choice is untested.** `en`, `en-us`, `en+f2`, `en+m3` and
+  `en-gb-x-rp` were synthesised for comparison. Only the `!v/adam` variant is
+  currently staged onto the SD card, so shipping a different variant means
+  adding its data file in `build-espeak-3ds.sh`.
