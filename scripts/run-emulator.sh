@@ -4,6 +4,13 @@
 #   scripts/run-emulator.sh [seconds]   run unattended, then report (default 120)
 #   scripts/run-emulator.sh manual      launch and leave it up for you to play
 #   scripts/run-emulator.sh report      read the trace from a manual session
+#   scripts/run-emulator.sh lua <file> [seconds]
+#                                       drive the game with a Lua script
+#
+# "lua" is what gets past an intro. A script can press buttons AND touch the
+# bottom screen, which is the only way through a name-entry keyboard, and it
+# can read the mod's own trace to find out what is on screen rather than
+# guessing at timings. See tools/azahar-lua-patch/.
 #
 # "manual" is the one that matters for anything involving menus or dialogue.
 # Auto-pressing a button cannot navigate a game, so an unattended run only ever
@@ -41,6 +48,16 @@ die()  { printf '\033[1;31mERR\033[0m %s\n' "$*" >&2; exit 1; }
 [ -f "${SCRIPT_DIR}/env.local.sh" ] && source "${SCRIPT_DIR}/env.local.sh"
 
 MODE="${1:-120}"
+LUA_SCRIPT=""
+
+if [ "${MODE}" = "lua" ]; then
+    LUA_SCRIPT="${2:-}"
+    [ -n "${LUA_SCRIPT}" ] || { printf 'usage: %s lua <script.lua> [seconds]
+' "$0" >&2; exit 2; }
+    [ -f "${LUA_SCRIPT}" ] || { printf 'no such script: %s
+' "${LUA_SCRIPT}" >&2; exit 2; }
+    MODE="${3:-180}"
+fi
 
 AZAHAR="${XYORAS_AZAHAR:-}"
 ROM="${XYORAS_ROM:-}"
@@ -93,6 +110,12 @@ report() {
     fi
     
     echo
+    if [ -f "${SD}/lua.log" ]; then
+        log "what the script did"
+        sed 's/^/    /' "${SD}/lua.log"
+        echo
+    fi
+
     log "speech written"
     if [ -d "${SD}/speech" ] && [ -n "$(ls -A "${SD}/speech" 2>/dev/null)" ]; then
         ls -la "${SD}/speech" | tail -n +4 | sed 's/^/    /'
@@ -136,7 +159,17 @@ rm -rf "${SD}/speech"
 # A comma-separated list cycles one button per press, because a single repeated
 # button cannot get through a screen that needs a cursor moved and then a
 # confirm.
-if [ "${MODE}" != "manual" ]; then
+if [ -n "${LUA_SCRIPT}" ]; then
+    # A script and the auto-press hack are alternatives; running both means two
+    # things fighting over the same buttons.
+    unset XYORAS_AUTO_PRESS || true
+    export XYORAS_LUA
+    XYORAS_LUA="$(cygpath -w "${LUA_SCRIPT}" 2>/dev/null || echo "${LUA_SCRIPT}")"
+    export XYORAS_LUA_LOG
+    XYORAS_LUA_LOG="$(cygpath -w "${SD}/lua.log" 2>/dev/null || echo "${SD}/lua.log")"
+    rm -f "${SD}/lua.log"
+    log "driving with $(basename "${LUA_SCRIPT}")"
+elif [ "${MODE}" != "manual" ]; then
     export XYORAS_AUTO_PRESS="${XYORAS_AUTO_PRESS:-a}"
 fi
 
