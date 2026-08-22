@@ -1,0 +1,284 @@
+diff --git a/externals/CMakeLists.txt b/externals/CMakeLists.txt
+index a63ee57..3c35557 100644
+--- a/externals/CMakeLists.txt
++++ b/externals/CMakeLists.txt
+@@ -525,3 +525,6 @@ else()
+     target_compile_definitions(xxhash PRIVATE XXH_VECTOR=XXH_SCALAR)
+     message(STATUS "Disabling SIMD for xxHash")
+ endif()
++
++# XYORAS: Lua, for scripting emulator input during reverse engineering.
++add_subdirectory(lua EXCLUDE_FROM_ALL)
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 1d2be96..3e02a01 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -323,6 +323,8 @@ add_library(citra_core STATIC EXCLUDE_FROM_ALL
+     hle/service/gsp/gsp_lcd.cpp
+     hle/service/gsp/gsp_lcd.h
+     hle/service/hid/hid.cpp
++    xyoras_script.cpp
++    xyoras_script.h
+     hle/service/hid/hid.h
+     hle/service/hid/hid_spvr.cpp
+     hle/service/hid/hid_spvr.h
+@@ -505,6 +507,8 @@ create_target_directory_groups(citra_core)
+ target_link_libraries(citra_core PUBLIC citra_common PRIVATE audio_core network video_core)
+ target_link_libraries(citra_core PRIVATE Boost::boost Boost::serialization Boost::iostreams httplib)
+ target_link_libraries(citra_core PUBLIC dds-ktx PRIVATE cryptopp fmt lodepng open_source_archives)
++# XYORAS: Lua input scripting, see src/core/xyoras_script.h
++target_link_libraries(citra_core PRIVATE lua)
+ 
+ if (ENABLE_WEB_SERVICE)
+     target_link_libraries(citra_core PRIVATE web_service)
+diff --git a/src/core/hle/service/hid/hid.cpp b/src/core/hle/service/hid/hid.cpp
+index 9eb6e6c..a383598 100644
+--- a/src/core/hle/service/hid/hid.cpp
++++ b/src/core/hle/service/hid/hid.cpp
+@@ -17,7 +17,13 @@
+ #include "core/hle/kernel/handle_table.h"
+ #include "core/hle/kernel/shared_memory.h"
+ #include "core/hle/kernel/shared_page.h"
++#include <cstdlib>
++#include <fmt/format.h>
++#include "core/memory.h"
++#include <string>
++#include <cstring>
+ #include "core/hle/service/hid/hid.h"
++#include "core/xyoras_script.h"
+ #include "core/hle/service/hid/hid_spvr.h"
+ #include "core/hle/service/hid/hid_user.h"
+ #include "core/hle/service/ir/ir_rst.h"
+@@ -214,6 +220,213 @@ void Module::UpdatePadCallback(std::uintptr_t user_data, s64 cycles_late) {
+         state.r.Assign(buttons[R - BUTTON_HID_BEGIN]->GetStatus());
+         state.start.Assign(buttons[Start - BUTTON_HID_BEGIN]->GetStatus());
+         state.select.Assign(buttons[Select - BUTTON_HID_BEGIN]->GetStatus());
++
++        // XYORAS: periodic heap scan for live objects by vptr. Tied to the
++        // pad callback purely because it runs steadily; CRO loads are too
++        // sparse and stop entirely once the game settles into a scene.
++        //
++        // XYORAS_SCAN_EVERY is the period in seconds (this callback runs at
++        // about 234 Hz).
++        if (const char* scan_every = std::getenv("XYORAS_SCAN_EVERY")) {
++            if (const char* scan_list = std::getenv("XYORAS_SCAN_VPTR")) {
++                static u32 scan_tick = 0;
++                const u32 period = static_cast<u32>(std::strtoul(scan_every, nullptr, 10)) * 234;
++                if (period > 0 && (++scan_tick % period) == 0) {
++                    std::string spec(scan_list);
++                    std::size_t pos = 0;
++                    while (pos < spec.size()) {
++                        std::size_t comma = spec.find(',', pos);
++                        if (comma == std::string::npos) {
++                            comma = spec.size();
++                        }
++                        const std::string one = spec.substr(pos, comma - pos);
++                        pos = comma + 1;
++                        if (one.empty()) {
++                            continue;
++                        }
++                        const u32 want =
++                            static_cast<u32>(std::strtoul(one.c_str(), nullptr, 16));
++                        u32 found = 0;
++                        std::string first;
++                        // Only the low 16 MB: every object observed so far
++                        // lives there, and GetPointer logs an error for each
++                        // unmapped page, so scanning the whole heap costs tens
++                        // of thousands of log lines per pass.
++                        const VAddr scan_end = Memory::HEAP_VADDR + 0x01000000;
++                        for (VAddr page = Memory::HEAP_VADDR; page < scan_end;
++                             page += Memory::CITRA_PAGE_SIZE) {
++                            u8* host = system.Memory().GetPointer(page);
++                            if (host == nullptr) {
++                                continue;
++                            }
++                            for (u32 off = 0; off + 4 <= Memory::CITRA_PAGE_SIZE; off += 4) {
++                                u32 word;
++                                std::memcpy(&word, host + off, sizeof(word));
++                                if (word == want) {
++                                    ++found;
++                                    if (found <= 4) {
++                                        first += fmt::format("{:08X} ", page + off);
++                                    }
++                                    // Walk the object looking for a member
++                                    // that points at UTF-16 text. Scanning and
++                                    // walking in the same pass is essential:
++                                    // the heap moves between boots, so an
++                                    // address recorded in one run means
++                                    // nothing in the next.
++                                    if (std::getenv("XYORAS_FIND_TEXT") != nullptr) {
++                                        const VAddr obj = page + off;
++                                        for (u32 m = 0; m < 96; ++m) {
++                                            const u32 cand =
++                                                system.Memory().Read32(obj + m * 4);
++                                            // Only plausible heap pointers.
++                                            if (cand < 0x08000000 || cand >= 0x0E000000) {
++                                                continue;
++                                            }
++                                            std::string txt;
++                                            bool ok = true;
++                                            for (u32 c = 0; c < 24; ++c) {
++                                                const u16 ch =
++                                                    system.Memory().Read16(cand + c * 2);
++                                                if (ch == 0) {
++                                                    break;
++                                                }
++                                                // Require printable ASCII. A
++                                                // looser range matches binary
++                                                // data and buries the real
++                                                // strings in noise.
++                                                if (ch < 0x20 || ch > 0x7E) {
++                                                    ok = false;
++                                                    break;
++                                                }
++                                                txt += static_cast<char>(ch);
++                                            }
++                                            if (ok && txt.size() >= 4) {
++                                                LOG_INFO(Service_HID,
++                                                         "XYORAS TEXT obj {:08X} +0x{:02X} "
++                                                         "-> {:08X} \"{}\"",
++                                                         obj, m * 4, cand, txt);
++                                            }
++                                        }
++                                    }
++
++                                    // gfl::str::StrBuf keeps a pointer to its
++                                    // text at +0x04 and a capacity at +0x08.
++                                    // Follow it and print anything readable --
++                                    // this is the whole point of the exercise.
++                                    if (std::getenv("XYORAS_DUMP_STRBUF") != nullptr &&
++                                        off + 12 <= Memory::CITRA_PAGE_SIZE) {
++                                        u32 text_ptr, cap;
++                                        std::memcpy(&text_ptr, host + off + 4, 4);
++                                        std::memcpy(&cap, host + off + 8, 4);
++                                        if (cap > 0 && cap <= 512) {
++                                            std::string out;
++                                            for (u32 c = 0; c < cap; ++c) {
++                                                const u16 ch =
++                                                    system.Memory().Read16(text_ptr + c * 2);
++                                                if (ch == 0) {
++                                                    break;
++                                                }
++                                                out += (ch >= 0x20 && ch < 0x7F)
++                                                           ? static_cast<char>(ch) : '.';
++                                            }
++                                            if (out.size() >= 2) {
++                                                LOG_INFO(Service_HID,
++                                                         "XYORAS STR {:08X}: \"{}\"",
++                                                         page + off, out);
++                                            }
++                                        }
++                                    }
++                                }
++                            }
++                        }
++                        LOG_INFO(Service_HID, "XYORAS SCAN vptr {:#010X}: {} objects  {}",
++                                 want, found, first);
++                    }
++                }
++            }
++        }
++
++        // XYORAS: drive the game without a human. Reverse engineering needs
++        // the game to reach an actual dialogue box, and the emulator offers no
++        // way to script input -- so synthesise it here instead.
++        //
++        // XYORAS_AUTO_PRESS names a button (a, b, start, up, down, left,
++        // right). It is pressed and released on a slow cycle, because menus
++        // ignore a button that is simply held down and the game needs to see
++        // an edge.
++        // XYORAS: a Lua script drives the pad, if one was given. It runs
++        // before the auto-press hack below and simply overrides it -- the two
++        // are alternatives, and the script is the one that can navigate.
++        XyorasScript::Step();
++        if (XyorasScript::IsActive()) {
++            const u32 s = XyorasScript::HeldButtons();
++            using XyorasScript::Button;
++            if (s & (1u << Button::BTN_A)) state.a.Assign(1);
++            if (s & (1u << Button::BTN_B)) state.b.Assign(1);
++            if (s & (1u << Button::BTN_X)) state.x.Assign(1);
++            if (s & (1u << Button::BTN_Y)) state.y.Assign(1);
++            if (s & (1u << Button::BTN_L)) state.l.Assign(1);
++            if (s & (1u << Button::BTN_R)) state.r.Assign(1);
++            // ZL and ZR are deliberately absent: they are New 3DS buttons
++            // delivered by the IR service, not the pad, so PadState has no
++            // field for them. The mod's modifier accepts L+R as the
++            // alternative, which is what a script should use.
++            if (s & (1u << Button::BTN_START)) state.start.Assign(1);
++            if (s & (1u << Button::BTN_SELECT)) state.select.Assign(1);
++            if (s & (1u << Button::BTN_UP)) state.up.Assign(1);
++            if (s & (1u << Button::BTN_DOWN)) state.down.Assign(1);
++            if (s & (1u << Button::BTN_LEFT)) state.left.Assign(1);
++            if (s & (1u << Button::BTN_RIGHT)) state.right.Assign(1);
++        }
++
++        if (const char* auto_button = std::getenv("XYORAS_AUTO_PRESS")) {
++            static u32 tick = 0;
++            ++tick;
++            // Roughly a quarter-second held, a quarter-second released, at the
++            // ~234 Hz this callback runs at.
++            const bool pressed = ((tick / 60) % 2) == 0;
++            if (pressed) {
++                // A comma-separated list cycles, one button per press. Pressing
++                // only A gets as far as the name-entry keyboard and then stops:
++                // that screen needs a cursor moved and a confirm, which a
++                // single repeated button can never do.
++                std::string spec(auto_button);
++                std::size_t count = 1;
++                for (char c : spec) {
++                    if (c == ',') {
++                        ++count;
++                    }
++                }
++                const std::size_t pick = (tick / 120) % count;
++                std::size_t seen = 0, start = 0;
++                std::string which = spec;
++                for (std::size_t i = 0; i <= spec.size(); ++i) {
++                    if (i == spec.size() || spec[i] == ',') {
++                        if (seen == pick) {
++                            which = spec.substr(start, i - start);
++                            break;
++                        }
++                        ++seen;
++                        start = i + 1;
++                    }
++                }
++                if (which == "a") {
++                    state.a.Assign(1);
++                } else if (which == "b") {
++                    state.b.Assign(1);
++                } else if (which == "start") {
++                    state.start.Assign(1);
++                } else if (which == "up") {
++                    state.up.Assign(1);
++                } else if (which == "down") {
++                    state.down.Assign(1);
++                } else if (which == "left") {
++                    state.left.Assign(1);
++                } else if (which == "right") {
++                    state.right.Assign(1);
++                }
++            }
++        }
+         state.debug.Assign(buttons[Debug - BUTTON_HID_BEGIN]->GetStatus());
+         state.gpio14.Assign(buttons[Gpio14 - BUTTON_HID_BEGIN]->GetStatus());
+ 
+@@ -293,6 +506,18 @@ void Module::UpdatePadCallback(std::uintptr_t user_data, s64 cycles_late) {
+         touch_entry.y = static_cast<u16>(y * Core::kScreenBottomHeight);
+         touch_entry.valid.Assign(pressed ? 1 : 0);
+ 
++        // XYORAS: a script touching the screen overrides the real input. The
++        // name-entry keyboard in Pokemon X cannot be worked with buttons, so
++        // without this a script cannot get through the intro at all.
++        {
++            u16 sx = 0, sy = 0;
++            if (XyorasScript::TouchState(sx, sy)) {
++                touch_entry.x = sx;
++                touch_entry.y = sy;
++                touch_entry.valid.Assign(1);
++            }
++        }
++
+         system.Movie().HandleTouchStatus(touch_entry);
+     }
+ 

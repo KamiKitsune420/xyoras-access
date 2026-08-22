@@ -1927,3 +1927,49 @@ route to the same data, and one this project can verify itself.
 `run-emulator.sh` deployed and launched a stale `.3gx` after a failed build, so
 a compile error was indistinguishable from "the change did not work". It now
 refuses to run if any source is newer than the binary.
+
+---
+
+## 2026-08-21 — Lua input scripting for the emulator
+
+Decided by the project owner after the previous session established that the
+mod has never been shown a line of story dialogue, and that the reason is an
+intro no amount of button-mashing can get through.
+
+The earlier `XYORAS_AUTO_PRESS` hook presses one named button on a slow cycle.
+That is enough for a screen that only wants acknowledging and nothing else.
+Pokemon X's opening asks which language, asks to confirm, wants a character
+chosen, and wants **a name typed on the touch screen** — and the auto-press
+hook cannot touch the screen at all.
+
+So Azahar now embeds Lua 5.4. A script named by `XYORAS_LUA` runs as a
+coroutine resumed once per pad update; anything that takes time yields, so the
+game runs normally in between and the script reads as a straight sequence.
+
+See `tools/azahar-lua-patch/` for the patch and the API.
+
+### The observer is the thing being observed
+
+`readfile()` lets a script read what the guest wrote. The mod writes everything
+it can see to `/xyoras-access/narration.txt`, and its read-screen command
+(`chord({"l", "r"})`) makes it write a fresh list on demand.
+
+So a script does not have to guess at timings or know what is on screen: it can
+press on, ask the mod what it sees, and branch. It also leaves a trail saying
+exactly how far it got and where it stopped, which is the thing every previous
+unattended run failed to produce.
+
+### Notes for anyone repeating this
+
+- **`zl` and `zr` cannot be driven through the pad.** They are New 3DS buttons
+  carried by the IR service; `PadState` has no field for them. Scripts use
+  `l`+`r`, which is why the mod's modifier accepts that as an alternative.
+- **A finished or failed script must let go of everything.** Otherwise it dies
+  mid-chord and leaves a button stuck down, and that looks like the game
+  hanging rather than the script erroring.
+- **Never run `cmake` on the build directory from MSYS2 or Git Bash.** It
+  rewrites the MSVC compiler paths in `CMakeCache.txt` down to `C`. The next
+  configure re-detects the toolchain and invalidates every object file, turning
+  a two-minute incremental build into a full rebuild of 2231 targets. That
+  mistake cost a full rebuild here. Use the `.bat` wrappers, which call
+  `vcvars64.bat` first.
