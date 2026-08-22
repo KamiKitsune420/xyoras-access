@@ -117,7 +117,6 @@ luma/plugins/000400000011C400/XYORASAccess.3gx   (Omega Ruby)
 luma/plugins/000400000011C500/XYORASAccess.3gx   (Alpha Sapphire)
 xyoras-access/espeak-ng-data/...                 (voice data)
 xyoras-access/sounds/...                         (non-speech cues)
-xyoras-access/config.txt                         (default settings)
 ```
 
 The same `.3gx` is copied into all four title-ID folders; the plugin detects

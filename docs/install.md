@@ -31,7 +31,6 @@ This project ships no game content. You supply the game.
    SD:/luma/plugins/000400000011C400/XYORASAccess.3gx    Omega Ruby
    SD:/luma/plugins/000400000011C500/XYORASAccess.3gx    Alpha Sapphire
    SD:/xyoras-access/espeak-ng-data/...                  voice data
-   SD:/xyoras-access/config.txt                          settings
    ```
 
    Only one `.3gx` file may be in each title-ID folder. Remove any other
@@ -43,9 +42,8 @@ This project ships no game content. You supply the game.
 
 ## Settings
 
-`SD:/xyoras-access/config.txt` is a plain text file you can edit from a
-computer. Every setting is also reachable from the in-game menu, which is
-spoken aloud.
+There are no settings yet. Speech runs at 200 words per minute with
+eSpeak's default English voice; both are compiled in for now.
 
 Speech rate is the one most people change first. It is in words per minute and
 accepts 80 to 450; the default of 200 is deliberately conservative.

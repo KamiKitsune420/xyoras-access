@@ -8,8 +8,8 @@
 The games use nearly every button, so the mod puts its commands behind a
 **held modifier**. Hold the modifier and press a key.
 
-The modifier is `ZL` by default on New 3DS, and `L`+`R` on consoles without
-`ZL`. Change it with `modifier` in `config.txt`.
+The modifier is `ZL` on New 3DS, and `L`+`R` on consoles without `ZL`. Both
+work, so you do not have to choose; there are no settings yet.
 
 ## Working now
 

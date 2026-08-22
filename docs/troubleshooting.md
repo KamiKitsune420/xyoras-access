@@ -34,7 +34,7 @@ with what you were doing when it happened.
 
 ## Speech is too slow, or too fast
 
-Change `rate` in `SD:/xyoras-access/config.txt`, or use the in-game menu.
+Not adjustable yet — the rate is compiled in at 200 words per minute.
 Valid range is 80 to 450 words per minute.
 
 ## The game crashes
@@ -58,6 +58,7 @@ anything else is a bug. Old 3DS is the tighter target.
 ## Reporting a bug
 
 Include the game, update version, console model, mod version, and what you
-were doing. If you can, enable `debug_log = on` in `config.txt`, reproduce the
+were doing. If you can, create an empty file `SD:/xyoras-access/trace-narration`,
+reproduce the
 problem, and attach `SD:/xyoras-access/log.txt`. Turn it back off afterwards —
 logging writes to the SD card and slows things down.

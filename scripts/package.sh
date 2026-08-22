@@ -9,7 +9,6 @@
 #   luma/plugins/<TitleID>/XYORASAccess.3gx   one copy per supported game
 #   xyoras-access/espeak-ng-data/             voice data
 #   xyoras-access/sounds/                     non-speech cues
-#   xyoras-access/config.txt                  default settings
 #
 # --first-boot additionally writes the `self-test` and `trace-narration`
 # marker files. They are what the bring-up sequence in
@@ -102,41 +101,21 @@ if [ -d "${XYORAS_ROOT}/plugin/data/sounds" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# Default config
+# Settings
 # -----------------------------------------------------------------------------
+#
+# There is deliberately no config.txt. One used to be written here, documenting
+# rate, pitch, volume, verbosity and the modifier key -- and nothing in the
+# plugin ever read it. Editing it did nothing, silently, which is worse than
+# having no settings at all: a player could reasonably conclude the mod was
+# broken rather than that the file was.
+#
+# It comes back when there is code to load it. Until then the compiled defaults
+# (200 wpm, pitch 50, voice "en") are the settings.
 
-if [ ! -f "${STAGE}/xyoras-access/config.txt" ]; then
-    log "writing default config"
-    cat > "${STAGE}/xyoras-access/config.txt" <<'CONFIG'
-# XYORAS Access settings.
-# Editable here or from the in-game menu. Lines starting with # are ignored.
-
-# Speech rate in words per minute (80-450).
-rate = 200
-
-# Voice pitch (0-100).
-pitch = 50
-
-# Output volume (0.0-1.0).
-volume = 1.0
-
-# Verbosity: terse | normal | verbose
-verbosity = normal
-
-# Short tick sound on each step, and a distinct sound when a step is blocked.
-movement_cues = on
-
-# Announce the map name when crossing into a new area.
-announce_map_changes = on
-
-# Modifier for the hotkey layer: zl | lr
-# ZL exists only on New 3DS; L+R works everywhere.
-modifier = zl
-
-# Write a debug log to /xyoras-access/log.txt. Slow — leave off unless needed.
-debug_log = off
-CONFIG
-fi
+# Remove one left over from an earlier package, so upgrading does not leave a
+# file that quietly does nothing.
+rm -f "${STAGE}/xyoras-access/config.txt"
 
 # -----------------------------------------------------------------------------
 # Archive
