@@ -1841,3 +1841,89 @@ Two things worth acting on:
   `en-gb-x-rp` were synthesised for comparison. Only the `!v/adam` variant is
   currently staged onto the SD card, so shipping a different variant means
   adding its data file in `build-espeak-3ds.sh`.
+
+---
+
+## 2026-08-21 — Where the text is not, and the thing we have never tested
+
+Reported as "still not reading story text". Two questions, and answering the
+first properly changed what the second one means.
+
+### Is the mod blind to part of memory? No.
+
+`kHeapMin`/`kHeapMax` (`0x08000000`–`0x08DF0000`) are inherited numbers this
+project never verified, so an unguarded survey swept the **entire APPLICATION
+region**, `0x08000000`–`0x10000000`, one megabyte at a time:
+
+```
+survey TextBox: 21 total, 0 outside the window
+survey Picture: 124 total, 0 outside the window
+```
+
+**Coverage is complete.** The window is not the problem, and that is now
+verified rather than assumed.
+
+The distribution is the interesting part:
+
+| Region | TextBox | Picture |
+| --- | --- | --- |
+| `0x08200000` | 21 | 35 |
+| `0x08900000` | 0 | 2 |
+| `0x08C00000` | **0** | **87** |
+
+A second live layout arena at `0x08C00000` holds 87 Pictures and no TextBoxes
+at all.
+
+### Searching by shape rather than by class
+
+If text panes were hiding under a different class — a CRO subclass, whose
+vtable is not in `code.bin` and can therefore never be found by scanning for a
+`code.bin` address — they would still hold a pointer to a UTF-16 string at
+`+0xD4`. So the scan was inverted: find words pointing at UTF-16 text, treat
+`word - 0xD4` as the object, and report what vtable it has.
+
+It found nothing hiding. In `0x08C00000` every hit was chance: arbitrary data
+that happens to read as a short ASCII pair. The one `code.bin` class it turned
+up, `0x00598A78`, is `pml::pokepara::Accessor` — a Pokemon data structure with
+an unrelated heap pointer at that offset.
+
+**A screen of 87 Pictures and no text is a screen with no text on it** — a 3D
+title or attract screen. Nothing was hiding.
+
+### The thing we have never actually tested
+
+Every measurement so far — every run, including the ones with a person playing —
+has been on the language-selection screen, the confirm dialog, or a text-free 3D
+screen. **The mod has never been shown a line of story dialogue.**
+
+So "it does not read story text" is not yet a finding. It is untested, and it
+could not have been tested, because the save has no completed intro: the game
+cannot get past language → confirm → title without someone playing through the
+opening. Auto-pressing one button cannot do that; the intro needs choices and a
+name entered.
+
+That is the blocker, and it is not a bug in the mod. Nothing about narration can
+be judged until the game is actually in gameplay.
+
+### Free discovery on the way past
+
+The neighbourhood of that false hit is worth keeping:
+
+| Class | vptr |
+| --- | --- |
+| `pml::pokepara::PokemonParam` | `0x00598A50` |
+| `pml::pokepara::CoreParam` | `0x00598A88` |
+| `pml::pokepara::Accessor` | `0x00598A78` |
+| `pml::personal::PersonalData` | `0x005989C0` |
+| `pml::wazadata::WazaData` | `0x00598AAC` |
+
+These are the in-memory Pokemon and species-data classes, all in `code.bin` and
+all findable by exactly the vtable scan already built. Party and Pokemon
+readouts may not need the unverified save offsets at all — this is a second
+route to the same data, and one this project can verify itself.
+
+### Also fixed
+
+`run-emulator.sh` deployed and launched a stale `.3gx` after a failed build, so
+a compile error was indistinguishable from "the change did not work". It now
+refuses to run if any source is newer than the binary.

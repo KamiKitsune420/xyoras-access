@@ -70,6 +70,17 @@ bool ReadBuf(u32 address, void *out, u32 size)
     return Process::CopyMemory(out, reinterpret_cast<void *>(address), size);
 }
 
+bool ReadBufUnguarded(u32 address, void *out, u32 size)
+{
+    if (out == nullptr || size == 0)
+        return false;
+    // No InHeap() check on purpose -- see the header. The process permission
+    // check still stands, so an unmapped page fails rather than faults.
+    if (!Process::CheckAddress(address, MEMPERM_READ))
+        return false;
+    return Process::CopyMemory(out, reinterpret_cast<void *>(address), size);
+}
+
 bool ReadPtr(u32 address, u32 &out)
 {
     u32 value = 0;

@@ -54,6 +54,19 @@ USERDIR="${XYORAS_AZAHAR_USER:-${APPDATA:-${HOME}/AppData/Roaming}/Azahar}"
 PLUGIN="${ROOT}/plugin/XYORASAccess.3gx"
 [ -f "${PLUGIN}" ] || die "${PLUGIN} not found — run scripts/build-plugin.sh first"
 
+# Refuse to deploy a binary older than the sources.
+#
+# A failed build leaves the previous .3gx in place, and this script happily
+# deployed and launched it -- so a compile error looked exactly like "the change
+# did not work", which cost a whole round trip. Better to stop.
+if [ "${MODE:-}" != "report" ]; then
+    NEWER="$(find "${ROOT}/plugin/source" "${ROOT}/plugin/include"                   -newer "${PLUGIN}" -name '*.[ch]pp' -print -quit 2>/dev/null)"
+    if [ -n "${NEWER}" ]; then
+        die "${PLUGIN} is older than $(basename "${NEWER}") — the last build failed.
+Run scripts/build-plugin.sh and read the errors."
+    fi
+fi
+
 # Pokemon X. The emulator runs one title at a time, so only this folder matters.
 TITLE_ID="0004000000055D00"
 SD="${USERDIR}/sdmc/xyoras-access"

@@ -100,6 +100,15 @@ namespace xyoras { namespace game {
     /// Reads a pointer and range-checks the result before handing it back.
     bool ReadPtr(u32 address, u32 &out);
 
+    /// Reads a block WITHOUT the heap-window guard, relying only on the
+    /// process's own permission check.
+    ///
+    /// Diagnostic. kHeapMin/kHeapMax are inherited numbers this project has
+    /// never verified, and a guard built on an unverified bound cannot be used
+    /// to test whether that bound is right -- it would simply refuse to look.
+    /// Nothing in normal operation should use this.
+    bool ReadBufUnguarded(u32 address, void *out, u32 size);
+
     /// Walks a chain of offsets, range-checking at every step.
     /// ReadChain(base, {0x10, 0x24}, out) == *(*(base) + 0x10) + 0x24
     bool ReadChain(u32 base, const u32 *offsets, u32 count, u32 &out);

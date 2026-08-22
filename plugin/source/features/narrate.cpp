@@ -101,6 +101,15 @@ namespace {
     /// a game process is worth avoiding.
     u32 g_scanBuffer[vtscan::kPageSize / 4];
 
+    // Declared here rather than beside their definitions: several of these
+    // call each other, and the definition order does not match the call order.
+    std::string Hex32(u32 value);
+    void ProbeSiblingPanes(void);
+    void SurveyAddressSpace(void);
+    void FindTextPanesByShape(u32, u32);
+    void SurveyOnceIfDue(void);
+    void DumpPaneLayout(const std::vector<narration::Observation> &, bool);
+
     std::string Hex32(u32 value)
     {
         static const char kDigits[] = "0123456789ABCDEF";
@@ -116,6 +125,31 @@ namespace {
     u32 TicksToMs(u64 ticks)
     {
         return static_cast<u32>(ticks / 268111ull);
+    }
+
+    /// Survey once, early, without waiting to be asked.
+    ///
+    /// One-shot and bounded. Normally a diagnostic that runs on its own is a
+    /// bad idea -- automatic sampling starved the poll loop badly enough to
+    /// hide a bug for a whole session -- but this one answers a question the
+    /// mod cannot work without, and needing a keypress to get the answer is
+    /// its own kind of failure.
+    void SurveyOnceIfDue(void)
+    {
+        if (!diag::IsNarrationTraceRequested())
+            return;
+
+        static u32 fullScans = 0;
+        static bool done = false;
+
+        if (done)
+            return;
+        if (++fullScans < 3)        // let the game settle into a real screen
+            return;
+
+        done = true;
+        diag::NarrationTrace("--- automatic one-shot survey ---");
+        SurveyAddressSpace();
     }
 
     /// Full heap scan for text panes. Deliberately rare -- see panecache.hpp.
@@ -158,6 +192,9 @@ namespace {
             return;
         }
 
+        if (!narrowed)
+            SurveyOnceIfDue();
+
         hits.resize(found < kMaxPanes ? found : kMaxPanes);
         diag::NarrationTrace("scan: " + std::to_string(found) + " panes found" +
                              (found > kMaxPanes
@@ -191,8 +228,6 @@ namespace {
         return read;
     }
 
-    void ProbeSiblingPanes(void);
-    void DumpPaneLayout(const std::vector<narration::Observation> &, bool);
 
     /// One-shot hex dump of what a TextBox holds before its string pointer.
     ///
@@ -260,6 +295,192 @@ namespace {
         }
 
         ProbeSiblingPanes();
+        SurveyAddressSpace();
+    }
+
+    /// Unguarded block reader, for the survey below only.
+    bool ReadBlockRaw(u32 address, void *out, u32 size, void * /*ctx*/)
+    {
+        return game::ReadBufUnguarded(address, out, size);
+    }
+
+    /// Counts layout objects across a much wider address range than the mod
+    /// normally scans, reporting where they actually are.
+    ///
+    /// Why this exists: kHeapMin/kHeapMax are inherited numbers -- 0x08000000
+    /// to 0x08DF0000, about 14 MB -- that this project has never verified. If
+    /// the game allocates its in-game screens above that bound, the mod is
+    /// blind to them and every scan would keep returning the same stale
+    /// objects from inside the window, which is exactly the symptom observed:
+    /// a full heap scan finding 21 TextBoxes belonging to a screen the player
+    /// left several minutes ago.
+    ///
+    /// One megabyte per line, so the shape of the heap is visible rather than
+    /// just a total.
+    void SurveyAddressSpace(void)
+    {
+        struct Probe { const char *name; const game::AddrPair *vt; };
+        const Probe probes[] = {
+            { "TextBox", &game::addr::kVtTextBox },
+            { "Picture", &game::addr::kVtPicture },
+        };
+
+        // Well past anything the mod currently looks at. The permission check
+        // makes unmapped regions cheap and safe.
+        const u32 kSurveyStart = 0x08000000;
+        const u32 kSurveyEnd   = 0x10000000;   // top of the APPLICATION region
+        const u32 kBucket      = 0x100000;      // 1 MB
+
+        for (u32 p = 0; p < sizeof(probes) / sizeof(probes[0]); ++p)
+        {
+            const u32 vtable = game::Addr(*probes[p].vt);
+            if (vtable == 0)
+                continue;
+
+            u32 total = 0;
+            u32 outside = 0;
+            std::string line;
+
+            for (u32 base = kSurveyStart; base < kSurveyEnd; base += kBucket)
+            {
+                const u32 found = vtscan::FindObjectsBlockwise(
+                    ReadBlockRaw, nullptr, base, base + kBucket, vtable,
+                    nullptr, 0, g_scanBuffer, vtscan::kPageSize / 4);
+
+                if (found == 0)
+                    continue;
+
+                total += found;
+                if (base < game::kHeapMin || base >= game::kHeapMax)
+                    outside += found;
+
+                line = std::string("  ") + Hex32(base) + "  " +
+                       std::to_string(found);
+                if (base < game::kHeapMin || base >= game::kHeapMax)
+                    line += "   <-- OUTSIDE the window the mod scans";
+                diag::NarrationTrace(line);
+
+                // Pictures mark where a live screen is. If text panes are
+                // hiding anywhere, they are hiding beside them.
+                if (p == 1 && found >= 8)
+                    FindTextPanesByShape(base, base + kBucket);
+            }
+
+            diag::NarrationTrace(std::string("survey ") + probes[p].name + ": " +
+                                 std::to_string(total) + " total, " +
+                                 std::to_string(outside) + " outside the window");
+        }
+    }
+
+    /// Finds text panes by SHAPE rather than by class.
+    ///
+    /// The survey showed an active layout arena holding 87 Pictures and zero
+    /// TextBoxes. A screen made of images with no text does not exist, so the
+    /// text panes are there and simply are not `nw::lyt::TextBox` -- almost
+    /// certainly a subclass defined in one of the CRO modules the game loads
+    /// at runtime, whose vtable is not in code.bin and therefore can never be
+    /// found by scanning for a code.bin address.
+    ///
+    /// Scanning for the class is a dead end. Scanning for the SHAPE is not:
+    /// whatever the class, a text pane holds a pointer to its UTF-16 string at
+    /// +0xD4. So this looks for words that point at UTF-16 text, treats the
+    /// word's address minus 0xD4 as the object, and reports what vtable that
+    /// object has. Those vtables are the text classes actually in use.
+    ///
+    /// Restricted to one region, because the check is a read per candidate and
+    /// that is far too expensive to do over the whole heap.
+    void FindTextPanesByShape(u32 regionStart, u32 regionEnd)
+    {
+        // Distinct vtables seen, with how many objects had each.
+        const u32 kMaxClasses = 16;
+        u32 vtables[kMaxClasses] = {0};
+        u32 counts[kMaxClasses]  = {0};
+        std::string samples[kMaxClasses];
+        u32 classCount = 0;
+        u32 candidates = 0;
+
+        for (u32 base = regionStart; base < regionEnd; base += vtscan::kPageSize)
+        {
+            if (!game::ReadBufUnguarded(base, g_scanBuffer, vtscan::kPageSize))
+                continue;
+
+            for (u32 i = 0; i < vtscan::kPageSize / 4; ++i)
+            {
+                const u32 candidate = g_scanBuffer[i];
+
+                // A string pointer: into the heap, and 2-byte aligned.
+                if (!game::InHeap(candidate) || (candidate & 1) != 0)
+                    continue;
+
+                // The object would start 0xD4 before this word.
+                const u32 wordAddr = base + i * 4;
+                if (wordAddr < textbox::kStringOffset)
+                    continue;
+                const u32 object = wordAddr - textbox::kStringOffset;
+                if (!game::InHeap(object))
+                    continue;
+
+                // Does it actually point at readable UTF-16 ASCII?
+                std::string text;
+                if (!textbox::ReadString(ReadWord, ReadHalf, nullptr, object, text))
+                    continue;
+                // WorthSpeaking is deliberately generous -- a two-letter menu
+                // label is worth saying. That is far too loose here: over a
+                // megabyte of arbitrary data, plenty of it reads as a short
+                // ASCII pair by chance, and the first run of this drowned its
+                // one real hit in "YY", "hm" and "ks". Real interface text is
+                // longer and contains a space or a good run of letters.
+                if (text.size() < 6)
+                    continue;
+                u32 letters = 0;
+                bool space = false;
+                for (u32 c = 0; c < text.size(); ++c)
+                {
+                    const char ch = text[c];
+                    if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'))
+                        ++letters;
+                    else if (ch == ' ')
+                        space = true;
+                }
+                if (letters < 5 || (!space && letters < 8))
+                    continue;
+
+                ++candidates;
+
+                u32 vptr = 0;
+                if (!game::Read32(object, vptr))
+                    continue;
+
+                u32 slot = 0;
+                for (; slot < classCount; ++slot)
+                    if (vtables[slot] == vptr)
+                        break;
+
+                if (slot == classCount)
+                {
+                    if (classCount >= kMaxClasses)
+                        continue;
+                    vtables[classCount] = vptr;
+                    samples[classCount] = text;
+                    ++classCount;
+                }
+                ++counts[slot];
+            }
+        }
+
+        diag::NarrationTrace("shape scan " + Hex32(regionStart) + "-" +
+                             Hex32(regionEnd) + ": " +
+                             std::to_string(candidates) + " text-like objects, " +
+                             std::to_string(classCount) + " distinct classes");
+
+        for (u32 i = 0; i < classCount; ++i)
+        {
+            const bool inCode = vtscan::PlausibleVtable(vtables[i]);
+            diag::NarrationTrace("  vptr " + Hex32(vtables[i]) + "  x" +
+                                 std::to_string(counts[i]) +
+                                 (inCode ? "  (in code.bin)" : "  (NOT in code.bin -- a CRO class)") +
+                                 "  e.g. \"" + samples[i] + "\"");
+        }
     }
 
     /// Scans for the other NintendoWare layout classes and reports where they
