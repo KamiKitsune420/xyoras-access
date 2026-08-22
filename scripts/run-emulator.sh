@@ -167,6 +167,10 @@ if [ -n "${LUA_SCRIPT}" ]; then
     XYORAS_LUA="$(cygpath -w "${LUA_SCRIPT}" 2>/dev/null || echo "${LUA_SCRIPT}")"
     export XYORAS_LUA_LOG
     XYORAS_LUA_LOG="$(cygpath -w "${SD}/lua.log" 2>/dev/null || echo "${SD}/lua.log")"
+    # The script runs on the host, so it needs the host path to the guest's SD
+    # card in order to read back what the mod wrote.
+    export XYORAS_SD_HOST
+    XYORAS_SD_HOST="$(cygpath -w "${SD}" 2>/dev/null || echo "${SD}")"
     rm -f "${SD}/lua.log"
     log "driving with $(basename "${LUA_SCRIPT}")"
 elif [ "${MODE}" != "manual" ]; then
