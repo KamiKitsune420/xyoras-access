@@ -23,6 +23,32 @@ path.
   CSND system service  ──────►  speakers, mixed over the game's audio
 ```
 
+## CSND is now rendered in Azahar (2026-08-24)
+
+The claim that no emulator renders CSND is no longer true of Adel's own Azahar
+build, and `scripts/run-emulator.sh` still documents the old behaviour.
+
+`AudioCore::DspInterface` gained a public `AddCsndVoice(pcm, rate_hz, vol_l,
+vol_r)`. Voices carry a fractional playback cursor -- CSND rates almost never
+match the DSP's 32728 Hz output -- and `MixCsndVoices()` runs inside
+`OutputFrame()` just before the frame reaches the sink, resampling with linear
+interpolation (nearest-neighbour is audibly gritty on speech) and mixing
+additively with saturation, so speech layers over the game's audio rather than
+replacing it. Finished voices are dropped; the queue is capped at 16 with
+oldest-first eviction so a runaway plugin cannot grow it unbounded.
+
+The existing CSND tap in `csnd_snd.cpp` feeds it from `DumpChannelAudio`,
+converting CSND's 16-bit fixed-point volumes (0x8000 == unity) to floats. The
+`.wav` dumping is unchanged, so `play-speech.sh` still works.
+
+**Not yet heard.** It compiles and links but has not been verified with audio.
+If it is silent, check first whether `DumpChannelAudio` fires for speech buffers
+at all -- the tap triggers on channel *start*, so a channel reused without a
+fresh configure-and-start would never reach the mixer. Existing `csnd_dump_N.wav`
+files in the Azahar user directory answer that immediately. Note also that the
+`dump-audio` marker switches the plugin to WavDump, bypassing CSND entirely --
+it must be absent to exercise this path.
+
 ## Why eSpeak NG
 
 - **Formant synthesis** — no recorded voice corpus, so the whole engine plus

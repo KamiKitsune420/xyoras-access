@@ -23,3 +23,4 @@ a lead, not a fact.
 | 12 | [Research log](12-research-log.md) | Sources, findings, dead ends |
 | 13 | [Glossary](13-glossary.md) | Terms and acronyms |
 | 14 | [Legal and licensing](14-legal-and-licensing.md) | GPL obligations, what must never be committed |
+| 15 | [Home Menu screen reader](15-home-menu-screen-reader.md) | The second plugin target: reading system UI aloud |

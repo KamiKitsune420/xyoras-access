@@ -31,6 +31,20 @@ xyoras-access/
 │   │   └── data/             Generated name tables
 │   └── data/                 Binary assets compiled into the plugin
 │
+├── browser/                  Accessible SD browser -- standalone homebrew
+│   └── app/                  eSpeak linked in, audio via NDSP, no CTRPF
+│       ├── Makefile
+│       ├── browser.rsf       Only needed if packaging as .cxi
+│       └── source/           main.c (browser) + tts.c/.h (reusable speech)
+│
+├── plugin-screenreader/      Second .3gx target — reads system UI, not games
+│   ├── Makefile              Mirrors plugin/Makefile; links ../plugin speech
+│   ├── ScreenReader.plgInfo  Compatibility: Any (Azahar rejects Console-only)
+│   ├── screenreader.cfg      Generated hook address; do not hand-edit
+│   ├── include/screenreader/ Public headers
+│   ├── source/               main.cpp (hook) + tts.cpp (adapter over speech/)
+│   └── testapp/              Homebrew host to develop the hook against
+│
 ├── cmake/
 │   └── 3DSToolchain.cmake    Cross-compile toolchain for dependencies
 │
@@ -69,6 +83,8 @@ xyoras-access/
 | A test that can run without a 3DS | `tools/host-test/` |
 | A build or packaging step | `scripts/` |
 | A tool that runs on the PC, not the 3DS | `tools/` |
+| Speech in standalone homebrew | `browser/app/source/tts.c` -- reusable as-is |
+| Anything about reading system UI aloud | `plugin-screenreader/` — see `AI docks/15-home-menu-screen-reader.md` |
 
 ## Naming conventions
 

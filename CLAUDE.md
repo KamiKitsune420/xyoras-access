@@ -45,6 +45,7 @@ substantive work in an area, read the matching doc:
 | `11-roadmap.md` | Deciding what to do next |
 | `12-research-log.md` | Looking for a source or prior finding |
 | `13-glossary.md` | Unfamiliar term |
+| `15-home-menu-screen-reader.md` | Touching `browser/`, `plugin-screenreader/`, or system-UI reading |
 | `14-legal-and-licensing.md` | Adding a dependency or distributing |
 
 ## Hard rules
