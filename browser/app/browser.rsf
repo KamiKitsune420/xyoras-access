@@ -1,0 +1,189 @@
+# ROM spec for the screen reader test host.
+#
+# Built as a .cxi (NCCH application) because CTRPF cannot run inside a homebrew
+# .3dsx process. See "AI docks/15-home-menu-screen-reader.md".
+#
+# NOTE: built WITHOUT makerom's `-desc` template. The stock `app:4` descriptor
+# does not grant the system calls and services CTRPF needs, and the symptom is
+# an immediate "Fatal plugin error: abort()" -- reproduced with the known-good
+# XYORASAccess.3gx, which proves it is the host and not the plugin.
+
+BasicInfo:
+  Title                     : "Accessible Browser"
+  ProductCode               : "CTR-P-A11Y"
+  Logo                      : Homebrew
+
+TitleInfo:
+  Category                  : Application
+  UniqueId                  : 0xF0001
+
+Option:
+  UseOnSD                   : true
+  FreeProductCode           : true
+  MediaFootPadding          : false
+  EnableCrypt               : false
+  EnableCompress            : true
+
+AccessControlInfo:
+  CoreVersion               : 2
+  DescVersion               : 2
+
+  # 64MB, matching retail Pokemon X. 96MB was tried and is NOT what a retail
+  # application uses; CTRPF is only ever exercised against the retail layout.
+  MemoryType                : Application
+  SystemMode                : 64MB
+  IdealProcessor            : 0
+  AffinityMask              : 1
+  Priority                  : 16
+  MaxCpu                    : 0
+  HandleTableSize           : 512
+
+  DisableDebug              : false
+  EnableForceDebug          : false
+  CanUseNonAlphabetAndNumber: false
+  CanWriteSharedPage        : false
+  CanUsePrivilegedPriority  : false
+  PermitMainFunctionArgument: false
+  CanShareDeviceMemory      : false
+  RunnableOnSleep           : false
+  SpecialMemoryArrange      : false
+
+  ReleaseKernelMajor        : "02"
+  ReleaseKernelMinor        : "35"
+
+  # Hardware ranges a retail application maps: two DSP/config windows and VRAM.
+  # CTRPF draws its own OSD, so it needs the framebuffer memory a normal
+  # homebrew console app never touches directly.
+  MemoryMapping:
+   - 1f000000-1f5fffff:r
+
+  IORegisterMapping:
+   - 1ff50000-1ff57fff
+   - 1ff70000-1ff77fff
+
+  FileSystemAccess:
+   - DirectSdmc
+   - DirectSdmcWrite
+   - CategorySystemApplication
+
+  ServiceAccessControl:
+   - APT:U
+   - ac:u
+   - act:u
+   - am:net
+   - boss:U
+   - cam:u
+   - cecd:u
+   - cfg:nor
+   - cfg:u
+   - csnd:SND
+   - dsp::DSP
+   - frd:u
+   - fs:USER
+   - gsp::Gpu
+   - gsp::Lcd
+   - hid:USER
+   - http:C
+   - ir:rst
+   - ir:u
+   - ir:USER
+   - ldr:ro
+   - mic:u
+   - ndm:u
+   - news:u
+   - nim:aoc
+   - ns:s
+   - nwm::UDS
+   - ptm:sysm
+   - ptm:u
+   - pxi:dev
+   - soc:U
+   - ssl:C
+   - y2r:u
+
+  # Exactly the set retail Pokemon X grants, decoded from its ExHeader.
+  # That process is known to run CTRPF, so it is the reference.
+  SystemCallAccess:
+    svc_01: 1
+    svc_02: 2
+    svc_03: 3
+    svc_06: 6
+    svc_08: 8
+    svc_09: 9
+    svc_0A: 10
+    svc_0B: 11
+    svc_0C: 12
+    svc_0F: 15
+    svc_11: 17
+    svc_13: 19
+    svc_14: 20
+    svc_15: 21
+    svc_16: 22
+    svc_17: 23
+    svc_18: 24
+    svc_19: 25
+    svc_1A: 26
+    svc_1B: 27
+    svc_1C: 28
+    svc_1D: 29
+    svc_1E: 30
+    svc_1F: 31
+    svc_20: 32
+    svc_21: 33
+    svc_22: 34
+    svc_23: 35
+    svc_24: 36
+    svc_25: 37
+    svc_27: 39
+    svc_28: 40
+    svc_29: 41
+    svc_2A: 42
+    svc_2B: 43
+    svc_2C: 44
+    svc_2D: 45
+    svc_2E: 46
+    svc_2F: 47
+    svc_30: 48
+    svc_31: 49
+    svc_32: 50
+    svc_35: 53
+    svc_36: 54
+    svc_37: 55
+    svc_38: 56
+    svc_39: 57
+    svc_3A: 58
+    svc_3B: 59
+    svc_3C: 60
+    svc_3D: 61
+
+SystemControlInfo:
+  SaveDataSize              : 0K
+  RemasterVersion           : 0
+  StackSize                 : 0x40000
+
+  Dependency:
+    ac                      : 0x0004013000002402
+    am                      : 0x0004013000001502
+    camera                  : 0x0004013000001602
+    cfg                     : 0x0004013000001702
+    codec                   : 0x0004013000001802
+    csnd                    : 0x0004013000002702
+    dsp                     : 0x0004013000001a02
+    fs                      : 0x0004013000001102
+    gpio                    : 0x0004013000001b02
+    gsp                     : 0x0004013000001c02
+    hid                     : 0x0004013000001d02
+    http                    : 0x0004013000002902
+    i2c                     : 0x0004013000001e02
+    mcu                     : 0x0004013000001f02
+    mic                     : 0x0004013000002002
+    ndm                     : 0x0004013000002b02
+    news                    : 0x0004013000003502
+    nim                     : 0x0004013000002c02
+    pdn                     : 0x0004013000002102
+    ps                      : 0x0004013000003102
+    ptm                     : 0x0004013000002202
+    ro                      : 0x0004013000003702
+    socket                  : 0x0004013000002e02
+    spi                     : 0x0004013000002302
+    ssl                     : 0x0004013000002f02
