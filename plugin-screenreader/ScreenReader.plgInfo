@@ -1,0 +1,30 @@
+Author: Adel Spence
+
+Version:
+    Major: 0
+    Minor: 1
+    Revision: 0
+
+# Empty = load for every title. Narrow this once a specific host is chosen.
+Targets:
+
+Title: Screen Reader
+
+Summary: Speaks menu items aloud
+
+Description: |
+  Accessibility plugin. Hooks the host process's menu-item text draw
+  function, captures the string, and speaks it through eSpeak NG.
+
+  Shares the speech stack with XYORAS Access.
+
+# MUST be "Any" or "Citra". Azahar's loader rejects CONSOLE-only plugins
+# (src/core/file_sys/plugin_3gx.cpp:96), and this plugin is developed there.
+Compatibility: Any
+
+# 3gxtool accepts ONLY "2MiB", "5MiB" or "10MiB"; anything else is silently
+# replaced by 5MiB. 10MiB matches XYORASAccess. The host here is a trivial test
+# app rather than a game, so the memory costs nothing.
+MemorySize: 10MiB
+
+UsePrivateMemory: false
