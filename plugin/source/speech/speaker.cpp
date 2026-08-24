@@ -16,9 +16,19 @@ namespace xyoras { namespace speech {
 
 namespace {
 
-    /// Worker stack. Synthesis is not deeply recursive; eSpeak's own buffers
-    /// come from the heap.
-    constexpr size_t kWorkerStackSize = 32 * 1024;
+    /// Worker stack.
+    ///
+    /// This was 32 KB, on the assumption that synthesis is not deeply recursive
+    /// and that eSpeak's buffers come from the heap. That assumption is wrong:
+    /// eSpeak overflowed a 32 KB stack in a standalone 3DS app running the same
+    /// synthesiser, a few seconds in. The failure is not a clean abort -- the
+    /// stack pointer walks below the heap base, a corrupted return address is
+    /// read back off it, and the process faults at PC 0 with a NoExecuteFault.
+    ///
+    /// Short game strings sit under the limit, so this can hide for a long time
+    /// and then surface on one long line. 512 KB matches what the standalone
+    /// apps use. See "AI docks/15-home-menu-screen-reader.md".
+    constexpr size_t kWorkerStackSize = 512 * 1024;
 
     /// How long the worker sleeps when there is nothing to say. Short enough
     /// that shutdown is prompt, long enough that idling costs nothing.
