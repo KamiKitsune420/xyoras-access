@@ -30,6 +30,7 @@
 #include "xyoras/diagnostics.hpp"
 #include "xyoras/game.hpp"
 #include "xyoras/narrate.hpp"
+#include "xyoras/menuwindow.hpp"
 #include "xyoras/narration.hpp"
 #include "xyoras/panecache.hpp"
 #include "xyoras/speech.hpp"
@@ -325,6 +326,84 @@ namespace {
 
     /// Read every cached pane. Shared by the automatic poll and the
     /// read-screen request, so both see exactly the same screen.
+    /// Announces the menu cursor, the way a screen reader should.
+    ///
+    /// A menu opening says how many options there are and reads the focused
+    /// one; moving the cursor reads only the option landed on. That is the
+    /// behaviour of nvgt's menu.nvgt and of NVDA speaking the focused object,
+    /// and it is the opposite of what this mod did before, which was to read
+    /// every option because every option had "changed".
+    ///
+    /// The label often cannot be resolved -- the entry payload's layout is not
+    /// known yet -- so position is announced regardless. "4 of 7" alone is
+    /// still navigable; silence is not.
+    void PollMenu(std::vector<std::string> &toSpeak)
+    {
+        const u32 vt = game::Addr(game::addr::kVtMenuWindow);
+        if (vt == 0)
+            return;
+
+        static u32 lastSelected = menuwindow::kNoSelection;
+        static u32 lastCount    = 0;
+        static u32 lastObject   = 0;
+
+        std::vector<u32> hits(4, 0);
+        const u32 found = vtscan::FindObjectsBlockwise(
+            ReadBlock, nullptr, game::kHeapMin, game::kHeapMax, vt,
+            &hits[0], 4, g_scanBuffer, vtscan::kPageSize / 4);
+
+        if (found == 0)
+        {
+            lastSelected = menuwindow::kNoSelection;
+            lastCount = 0;
+            lastObject = 0;
+            return;
+        }
+
+        menuwindow::State st;
+        if (!menuwindow::Read(ReadWord, nullptr, hits[0], st))
+            return;
+
+        // A different menu object, or a different size, means a new menu rather
+        // than movement within the current one.
+        const bool isNewMenu = (hits[0] != lastObject) || (st.count != lastCount);
+
+        if (!isNewMenu && st.selected == lastSelected)
+            return;                     // nothing moved
+
+        lastObject   = hits[0];
+        lastCount    = st.count;
+        lastSelected = st.selected;
+
+        if (!st.HasFocus())
+            return;                     // menu present, cursor not on anything yet
+
+        std::string phrase;
+        if (isNewMenu)
+        {
+            phrase = narration::Narrator::Count(st.count) + " items. ";
+        }
+
+        std::string label;
+        const u32 payload = menuwindow::EntryPayload(st, st.selected);
+        if (payload != 0)
+        {
+            u32 inner = 0;
+            if (game::Read32(payload, inner) && mem::InHeap(inner))
+                strbuf::ReadString(ReadWord, ReadHalf, nullptr, inner, label);
+            if (label.empty())
+                strbuf::ReadString(ReadWord, ReadHalf, nullptr, payload, label);
+        }
+
+        if (!label.empty())
+            phrase += label + ". ";
+
+        phrase += narration::Narrator::Count(st.selected + 1) + " of " +
+                  narration::Narrator::Count(st.count) + ".";
+
+        toSpeak.push_back(phrase);
+    }
+
     u32 Observe(std::vector<narration::Observation> &observed)
     {
         const std::vector<u32> &panes = g_cache.Panes();
@@ -850,6 +929,18 @@ namespace {
         {
             diag::NarrationTrace("say: " + toSpeak[i]);
             speech::Say(speech::Priority::Dialogue, toSpeak[i]);
+        }
+
+        // The menu cursor is read separately and at Ui priority, because it is
+        // the player moving rather than the game speaking. Ui replaces a
+        // pending Ui item, so running the cursor down a list does not build a
+        // backlog -- whereas Dialogue queues and would.
+        std::vector<std::string> menuSpeak;
+        PollMenu(menuSpeak);
+        for (u32 i = 0; i < menuSpeak.size(); ++i)
+        {
+            diag::NarrationTrace("menu: " + menuSpeak[i]);
+            speech::Say(speech::Priority::Ui, menuSpeak[i]);
         }
     }
 

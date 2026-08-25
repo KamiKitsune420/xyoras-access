@@ -20,6 +20,7 @@
 #define XYORAS_STRBUF_HPP
 
 #include "xyoras/common.hpp"
+#include "xyoras/memchain.hpp"
 #include "xyoras/textbox.hpp"
 
 #include <string>

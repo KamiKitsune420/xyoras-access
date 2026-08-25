@@ -204,9 +204,21 @@ namespace xyoras { namespace narration {
 
         bool BaselinePending() const { return baselinePending_; }
 
-    private:
-        /// "5 items", without pulling stdio into a header the host tests
+        /// Decimal digits, without pulling stdio into a header the host tests
         /// compile as plain C++.
+        static std::string Count(std::size_t n)
+        {
+            std::string digits;
+            if (n == 0)
+                return "0";
+            while (n > 0)
+            {
+                digits.insert(digits.begin(), static_cast<char>('0' + (n % 10)));
+                n /= 10;
+            }
+            return digits;
+        }
+
         static std::string CountPhrase(std::size_t n)
         {
             std::string digits;

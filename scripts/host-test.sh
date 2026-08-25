@@ -25,7 +25,7 @@ mkdir -p "${OUT_DIR}"
 
 # Each test names the plugin sources it needs compiled alongside it, so the
 # tests exercise the shipped implementation rather than a copy of it.
-TESTS=(test_queue test_wav test_bcwav test_pk6 test_names test_memchain test_phrases test_vtscan test_textbox test_screentext test_narration test_panecache test_hotkeys)
+TESTS=(test_queue test_wav test_bcwav test_pk6 test_names test_memchain test_phrases test_vtscan test_textbox test_screentext test_narration test_menuwindow test_panecache test_hotkeys)
 SRCS_test_queue="${ROOT}/plugin/source/speech/queue.cpp"
 SRCS_test_wav=""
 SRCS_test_bcwav=""
@@ -36,6 +36,7 @@ SRCS_test_vtscan=""
 SRCS_test_textbox=""
 SRCS_test_screentext=""
 SRCS_test_narration=""
+SRCS_test_menuwindow=""
 SRCS_test_panecache=""
 SRCS_test_hotkeys=""
 SRCS_test_names="${ROOT}/plugin/source/data/names_species.cpp ${ROOT}/plugin/source/data/names_moves.cpp ${ROOT}/plugin/source/data/names_abilities.cpp ${ROOT}/plugin/source/data/names_items.cpp"

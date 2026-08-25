@@ -26,6 +26,7 @@
 #define XYORAS_MENUWINDOW_HPP
 
 #include "xyoras/common.hpp"
+#include "xyoras/memchain.hpp"
 
 namespace xyoras { namespace menuwindow {
 
