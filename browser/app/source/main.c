@@ -17,10 +17,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-// eSpeak recurses deeply. libctru's default 32 KB main-thread stack overflows a
-// few seconds in, walking off into unmapped memory and ending at PC 0.
-unsigned int __stacksize__ = 512 * 1024;
+// Stack size now lives in tts.c, so the speech module carries its own
+// requirement into whatever host links it.
 
 #define MAX_ENTRIES  512
 #define NAME_MAX_LEN 256
