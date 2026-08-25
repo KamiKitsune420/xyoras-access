@@ -117,6 +117,36 @@ namespace {
 
             if (!stats.ok || sink.Empty())
                 continue;
+
+            // Let this utterance finish before starting the next.
+            //
+            // Without it the queue is drained as fast as synthesis manages and
+            // the results overlap -- which is why a menu was heard as all of
+            // its options at once, and why a prompt was cut off by the YES/NO
+            // that followed it. NVDA serialises speech absolutely for the same
+            // reason, and audio-game menus queue the focused item behind the
+            // menu intro rather than racing it.
+            //
+            // An arriving Interrupt still cuts in: the wait breaks as soon as
+            // the queue has something, and the priority sort decides what wins.
+            // Bounded by how long the audio actually is. Busy() depends on the
+            // backend telling the truth about playback, and under emulation
+            // CSND is only observed rather than played -- so it can report busy
+            // forever. An unbounded wait there means the worker never returns
+            // and speech stops completely after the first line, which is worse
+            // than the overlap this is fixing.
+            const u32 rate = (g_synth != NULL && g_synth->SampleRate() > 0)
+                                 ? static_cast<u32>(g_synth->SampleRate())
+                                 : 22050u;
+            const u64 expectedMs = (static_cast<u64>(stats.samples) * 1000ull) / rate;
+            const u64 deadline = osGetTime() + expectedMs + 500ull;
+
+            while (g_running && g_audio != NULL && g_audio->Busy() && g_queue.Empty())
+            {
+                if (osGetTime() >= deadline)
+                    break;
+                svcSleepThread(10ull * 1000ull * 1000ull);   // 10 ms
+            }
         }
     }
 }

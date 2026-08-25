@@ -61,6 +61,18 @@ namespace xyoras { namespace speech {
         virtual void Stop(void)                                                     = 0;
         virtual void OnAptEvent(void)                                               = 0;
         virtual ~IAudioOut() {}
+
+        /// True while a previously submitted utterance is still audible.
+        ///
+        /// Without this the worker fires utterances back to back and they
+        /// overlap. What that sounds like depends on the backend: on hardware
+        /// they layer and every menu option is heard at once, and once CSND is
+        /// actually rendered each one cuts the last off mid-word. Both are the
+        /// same bug -- nothing ever waits.
+        ///
+        /// Default false so a backend that cannot tell keeps the old
+        /// fire-and-forget behaviour rather than deadlocking.
+        virtual bool Busy(void) const { return false; }
     };
 
     /// Which audio backend the speech worker should use.

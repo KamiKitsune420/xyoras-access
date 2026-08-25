@@ -126,7 +126,10 @@ namespace xyoras { namespace game { namespace addr {
     /// gfl::str::StrWin
     const AddrPair kVtStrWin       = { 0x00598580, 0 };
 
-    /// app::tool::TalkWindow -- the dialogue box itself.
+    /// app::tool::TalkWindow. NOT the dialogue box, despite the name: surveyed
+    /// live on conversation screens and there are never any instances. The box
+    /// actually on screen is print::MsgWin (below), and its text lives in a
+    /// gfl::str::StrBuf.
     const AddrPair kVtTalkWindow   = { 0x00597100, 0 };
 
     /// app::tool::TalkWindowGra
@@ -144,9 +147,14 @@ namespace xyoras { namespace game { namespace addr {
     /// print::MsgWin
     const AddrPair kVtMsgWin       = { 0x00599A60, 0 };
 
-    /// nw::lyt::TextBox -- the NintendoWare layout text pane. THIS is where
-    /// on-screen text actually lives, not gfl::str::StrBuf (which turns out to
-    /// be a pool of mostly-empty formatting buffers).
+    /// nw::lyt::TextBox -- the NintendoWare layout text pane. Where menu
+    /// labels, prompts and captions live.
+    ///
+    /// NOT where dialogue lives. StrBuf really is mostly a pool of empty
+    /// formatting buffers, which is why it was dismissed -- but the message
+    /// currently on screen is in one of them, and a TextBox-only scan is deaf
+    /// to every conversation in the game. Both classes are scanned now; see
+    /// strbuf.hpp for the layout and 12-research-log.md for how it was found.
     ///
     /// Live instance counts track the screen exactly: 0 during a transition,
     /// 155 on a text-heavy setup screen, 21 on a sparse one.

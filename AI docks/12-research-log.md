@@ -5,6 +5,71 @@ is still useful context. Newest sections at the bottom.
 
 ---
 
+## Dialogue is not a TextBox — it is a gfl::str::StrBuf (2026-08-25)
+
+Menus, prompts and button captions were narrated from the first working build;
+conversations never were. Three plausible explanations were tried and all three
+were wrong:
+
+- **A second TextBox class in a CRO.** There is exactly one `nw::lyt::TextBox`
+  and it is the one already scanned for. (Fixing the vtable plausibility window
+  to admit CRO addresses was still a real bug fix -- it capped at 0x00700000,
+  and its own comment noted CROs load above that -- but it was not this.)
+- **A filtering or settling problem.** No: a layout dump on a YES/NO screen
+  found sixteen panes, being YES, NO and fourteen `-------------------`
+  placeholders. The dialogue was not among them at all.
+- **`app::tool::TalkWindow`.** Named in `addresses.cpp` as "the dialogue box
+  itself", but a live survey finds zero instances of it on any screen.
+
+### What it actually is
+
+Surveying the whole dialogue family at once, on a screen with text showing:
+
+    TextBox 21, Picture 124, TalkWindow 0, MsgWin 1, StrWin 0, MenuWindow 1
+
+`print::MsgWin` (0x00599A60) is the box. Its constructor is `FUN_003f6150`,
+found by resolving the literal at 0x003f6208; the object carries two vtables,
+0x00599A60 at +0x00 and 0x00599A94 at +0x9C, which is why its fields look
+misaligned from outside.
+
+The text is not in `MsgWin` directly. `StrBuf`'s vtable is referenced beside the
+base constructor `MsgWin` calls, and decompiling that (`FUN_0038E4A8`) gives the
+layout:
+
+    +0x00  vtable = 0x00598570
+    +0x04  pointer to UTF-16 characters
+    +0x08  u16 capacity (length + 1)
+    +0x0A  u16 length, in characters
+    +0x0C  owns-buffer flag
+
+The allocation is `capacity << 1` bytes, which settles the encoding as UTF-16.
+Reading it produced game dialogue immediately:
+
+    STRBUF "We live together with these Pokemon, lending our strength to one
+            another to live and prosper."
+
+### app::tool::MenuWindow, while we were there
+
+Constructor `FUN_00331200` (0x005970E0):
+
+    +0x14  u32 dimA   \  item count is the product
+    +0x18  u32 dimB   /
+    +0x20  u32 items  entry array, stride 0x1C, payload at entry+0x14
+    +0x28  u32 selected, initialised to 0xFFFFFFFF for "none"
+
+Confirmed against a live YES/NO menu: dimA=2, dimB=1, selected=1. This is what
+makes cursor-follows-focus possible; reading every option on open was never a
+tuning problem, the selection was simply invisible.
+
+### How
+
+`tools/romextract/` -- NCSD/NCCH parse, IVFC walk for the 133 CRO modules, and
+a BLZ unpacker for `.code` (2.8 MB packed, 5.15 MB out). Imported to Ghidra
+based at 0x00100000 so addresses match `addresses.cpp` with no conversion.
+RTTI answered the class names; the decompiler answered the layouts. Neither
+could have been guessed from the heap.
+
+
 ## 2026-08-20 — Initial research pass
 
 ### How accessibility mods are made

@@ -81,6 +81,18 @@ namespace {
             return true;
         }
 
+        /// True while any slot is still audible. The worker waits on this so
+        /// one utterance finishes before the next begins.
+        bool Busy(void) const override
+        {
+            for (u32 i = 0; i < kSlots; ++i)
+            {
+                if (slots_[i].loaded && cwavIsPlaying(const_cast<CWAV *>(&slots_[i].cwav)))
+                    return true;
+            }
+            return false;
+        }
+
         bool Play(const s16 *pcm, u32 samples, int sampleRate, float pan) override
         {
             if (!ready_ || pcm == nullptr || samples == 0)

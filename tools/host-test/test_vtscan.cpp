@@ -46,7 +46,12 @@ namespace {
         test::Check(vtscan::PlausibleVtable(0x005970FC), "an address inside code.bin");
         test::Check(vtscan::PlausibleVtable(0x00100000), "the code base itself");
         test::Check(!vtscan::PlausibleVtable(0x000FFFFC), "below the code base");
-        test::Check(!vtscan::PlausibleVtable(0x00700000), "at the upper limit (exclusive)");
+        // A CRO module's vtable. This is the case the mod exists to handle:
+        // Gen 6 draws its message box from DllDialogCommon, loaded above
+        // code.bin, and rejecting those addresses left dialogue unreadable.
+        test::Check(vtscan::PlausibleVtable(0x00700000), "an address in a loaded CRO module");
+        test::Check(vtscan::PlausibleVtable(0x07FFFFFC), "just below the heap");
+        test::Check(!vtscan::PlausibleVtable(0x08000000), "at the upper limit (exclusive)");
         test::Check(!vtscan::PlausibleVtable(0x08800000), "a heap address is not a vtable");
         test::Check(!vtscan::PlausibleVtable(0), "null");
 

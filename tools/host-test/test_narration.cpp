@@ -22,8 +22,13 @@ namespace {
     void Settle(narration::Narrator &n, const std::vector<Observation> &obs,
                 std::vector<std::string> &spoken)
     {
+        // kSettlePolls + 1 is what it takes for the text itself to settle. The
+        // extra poll is the quiet one the baseline now waits for: it absorbs a
+        // whole arriving screen rather than only the first poll in which
+        // something settles, because panes settle at different times and the
+        // stragglers were being spoken as though they were new.
         spoken.clear();
-        for (u32 i = 0; i < screentext::kSettlePolls + 1; ++i)
+        for (u32 i = 0; i < screentext::kSettlePolls + 2; ++i)
         {
             std::vector<std::string> out;
             n.Poll(obs, out);
@@ -42,6 +47,62 @@ namespace {
         obs.push_back(Observation(0x08100300, "SAVE"));
         obs.push_back(Observation(0x08100400, "OPTIONS"));
         return obs;
+    }
+
+    // The bug this guards against: panes on one screen settle at different
+    // times. A short button caption settles while a typed-out message is still
+    // animating, and the baseline used to lift on the first settle -- so the
+    // slower pane was then spoken as though the player had caused it. On the
+    // opening screen that was heard as two unrelated lines at once.
+    void TestStaggeredArrivalIsAllBaseline(void)
+    {
+        test::Section("panes that settle at different times");
+
+        narration::Narrator n;
+        std::vector<std::string> spoken;
+        std::vector<std::string> out;
+
+        // The quick pane is there from the start; the slow one is still typing.
+        std::vector<Observation> quickOnly;
+        quickOnly.push_back(Observation(0x08100000, "YES"));
+
+        for (u32 i = 0; i < screentext::kSettlePolls + 1; ++i)
+        {
+            out.clear();
+            n.Poll(quickOnly, out);
+            for (u32 j = 0; j < out.size(); ++j) spoken.push_back(out[j]);
+        }
+
+        // Now the slower pane finishes typing and settles too.
+        std::vector<Observation> both = quickOnly;
+        both.push_back(Observation(0x08100100, "Professor Sycamore is waiting."));
+
+        for (u32 i = 0; i < screentext::kSettlePolls + 2; ++i)
+        {
+            out.clear();
+            n.Poll(both, out);
+            for (u32 j = 0; j < out.size(); ++j) spoken.push_back(out[j]);
+        }
+
+        test::Equal(spoken.size(), 0u, "the whole arriving screen stays silent");
+        test::Check(!n.BaselinePending(), "and the baseline is spent by the end");
+
+        // A genuinely later change must still speak, or the fix has simply
+        // turned the narrator off.
+        std::vector<Observation> later = both;
+        later.push_back(Observation(0x08100200, "Which will you choose?"));
+
+        spoken.clear();
+        for (u32 i = 0; i < screentext::kSettlePolls + 2; ++i)
+        {
+            out.clear();
+            n.Poll(later, out);
+            for (u32 j = 0; j < out.size(); ++j) spoken.push_back(out[j]);
+        }
+
+        test::Equal(spoken.size(), 1u, "but a line arriving afterwards is spoken");
+        if (spoken.size() == 1)
+            test::EqualStr(spoken[0], "Which will you choose?", "and it is that line");
     }
 
     void TestBaselineIsSilent(void)
@@ -289,6 +350,7 @@ int main(void)
     std::printf("\nchoosing what to narrate\n========================\n");
 
     TestBaselineIsSilent();
+    TestStaggeredArrivalIsAllBaseline();
     TestChangeIsSpoken();
     TestStaticFurnitureStaysSilent();
     TestChangedLabelIsSpoken();

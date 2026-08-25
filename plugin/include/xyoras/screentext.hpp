@@ -89,6 +89,11 @@ namespace xyoras { namespace screentext {
             return true;
         }
 
+        /// True while this pane holds text that has not finished settling --
+        /// i.e. it is still mid-animation. Distinct from "nothing fired this
+        /// poll", which is also true of a pane that is simply idle.
+        bool Unsettled() const { return !pending_.empty() && stable_ < kSettlePolls; }
+
         /// What was last reported. Empty if nothing has been.
         const std::string &LastSpoken() const { return spoken_; }
 

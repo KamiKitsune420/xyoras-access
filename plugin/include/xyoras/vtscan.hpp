@@ -31,7 +31,21 @@ namespace xyoras { namespace vtscan {
     /// Where `code.bin` is mapped. Everything reachable by a fixed address
     /// lives between here and roughly +0x4EB000 for Pokemon X.
     constexpr u32 kCodeBase = 0x00100000;
-    constexpr u32 kCodeMax  = 0x00700000;   ///< generous; CROs load above this
+
+    /// Upper bound for a vtable address: the base of the heap.
+    ///
+    /// This was 0x00700000, chosen to cover code.bin -- and its own comment
+    /// noted that CROs load above it. That is precisely the problem: Gen 6 is
+    /// 84 CRO modules, and a TextBox created by one of them (the in-game
+    /// message box lives in DllDialogCommon) has its vtable in that module,
+    /// above the old limit. Such panes were rejected as implausible and could
+    /// never be found, which is why menus and prompts drawn from code.bin were
+    /// narrated while dialogue was silent.
+    ///
+    /// The guard's actual purpose -- refusing to treat arbitrary heap data as
+    /// a vtable -- is kept: vtables live in executable memory, objects live in
+    /// the heap at 0x08000000 and above, so that is the real boundary.
+    constexpr u32 kCodeMax  = 0x08000000;
 
     /// A vtable address must at least lie inside the executable. Rejecting
     /// anything else stops a typo in the address table turning into a scan

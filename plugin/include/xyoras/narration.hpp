@@ -60,7 +60,7 @@ namespace xyoras { namespace narration {
     class Narrator
     {
     public:
-        Narrator() : baselinePending_(true) {}
+        Narrator() : baselinePending_(true), baselineSawSettle_(false), baselinePolls_(0) {}
 
         /// Feed every visible pane, then take the utterances back.
         ///
@@ -74,6 +74,7 @@ namespace xyoras { namespace narration {
 
             std::map<u32, screentext::Tracker> next;
             bool settledSomething = false;
+            bool anyUnsettled = false;
 
             for (u32 i = 0; i < observed.size(); ++i)
             {
@@ -102,19 +103,64 @@ namespace xyoras { namespace narration {
                         AppendUnique(toSpeak, settled);
                 }
 
+                if (t.Unsettled())
+                    anyUnsettled = true;
+
                 next[o.id] = t;
             }
 
             trackers_.swap(next);
 
-            // The baseline lifts on the poll where text first SETTLES, not
-            // merely on the first poll. Text needs several polls to settle, so
-            // lifting earlier would leave the baseline already spent by the
-            // time the opening screen finished settling -- and the whole
-            // screen would be read out, which is the flood this exists to
-            // prevent.
-            if (baselinePending_ && settledSomething)
-                baselinePending_ = false;
+            // A burst of lines settling together is a menu or panel opening,
+            // not the player causing something. Reading every option aloud is
+            // the flood this design exists to avoid, and it is what made the
+            // repeat-last key replay an entire menu.
+            //
+            // Audio-game menus solve this by speaking an intro that carries the
+            // count, then only the focused item (see nvgt's menu.nvgt), and
+            // NVDA does the same thing by speaking the focused object rather
+            // than the screen. Announcing the count is the half that can be
+            // done without knowing which item is focused; the other half needs
+            // the selection highlight, which is a Picture rather than a
+            // TextBox and is not yet identified.
+            if (toSpeak.size() > kBurstIsAMenu)
+            {
+                const std::size_t count = toSpeak.size();
+                toSpeak.clear();
+                toSpeak.push_back(CountPhrase(count));
+            }
+
+            // The baseline has to cover the WHOLE arriving screen, not just
+            // the first poll in which something settles.
+            //
+            // Panes settle at different times: a short button caption settles
+            // while a typed-out message is still animating. Lifting on the
+            // first settle therefore leaves the rest of the same screen to be
+            // spoken as though it were new -- which is heard as two unrelated
+            // lines talking over each other on arrival.
+            //
+            // So keep absorbing while settles are still arriving, and lift on
+            // the first quiet poll after them. The poll cap is the escape
+            // hatch: a screen with a permanently animating pane would never go
+            // quiet, and never speaking again is worse than one extra line.
+            if (baselinePending_)
+            {
+                ++baselinePolls_;
+
+                if (settledSomething)
+                    baselineSawSettle_ = true;
+
+                // Quiet means nothing fired AND nothing is still animating.
+                // Without the second half, a pane part-way through typing looks
+                // quiet simply because it has not fired yet, the baseline lifts
+                // early, and that pane is spoken when it finally settles --
+                // which is the very bug this is meant to prevent.
+                if (baselineSawSettle_ && !settledSomething && !anyUnsettled)
+                    baselinePending_ = false;
+
+                if (baselinePolls_ >= kBaselineMaxPolls)
+                    baselinePending_ = false;
+            }
         }
 
         /// Everything currently on screen, for the read-screen hotkey.
@@ -134,10 +180,22 @@ namespace xyoras { namespace narration {
         ///
         /// For real context changes -- entering a battle, opening a menu --
         /// where the previous screen's text says nothing about this one.
+        /// Polls the baseline may absorb before it lifts regardless. Long
+        /// enough for a screen to finish arriving, short enough that a screen
+        /// which never goes quiet still becomes audible.
+        static const u32 kBaselineMaxPolls = 40;
+
+        /// More lines than this settling in one poll means a screen arrived,
+        /// not that something happened. Two is deliberate: a prompt plus its
+        /// answer is normal, a five-option menu is not.
+        static const std::size_t kBurstIsAMenu = 2;
+
         void NewContext()
         {
             trackers_.clear();
             baselinePending_ = true;
+            baselineSawSettle_ = false;
+            baselinePolls_ = 0;
         }
 
         /// How many panes are being tracked. Exposed so a runaway can be
@@ -147,8 +205,25 @@ namespace xyoras { namespace narration {
         bool BaselinePending() const { return baselinePending_; }
 
     private:
+        /// "5 items", without pulling stdio into a header the host tests
+        /// compile as plain C++.
+        static std::string CountPhrase(std::size_t n)
+        {
+            std::string digits;
+            if (n == 0)
+                digits = "0";
+            while (n > 0)
+            {
+                digits.insert(digits.begin(), static_cast<char>('0' + (n % 10)));
+                n /= 10;
+            }
+            return digits + " items";
+        }
+
         std::map<u32, screentext::Tracker> trackers_;
         bool baselinePending_;
+        bool baselineSawSettle_;   ///< a settle has landed during this baseline
+        u32  baselinePolls_;       ///< polls since the baseline began
     };
 
 }} // namespace xyoras::narration

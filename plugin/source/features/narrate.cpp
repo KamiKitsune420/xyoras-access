@@ -34,6 +34,7 @@
 #include "xyoras/panecache.hpp"
 #include "xyoras/speech.hpp"
 #include "xyoras/sync.hpp"
+#include "xyoras/strbuf.hpp"
 #include "xyoras/textbox.hpp"
 #include "xyoras/vtscan.hpp"
 
@@ -49,6 +50,10 @@ namespace {
     /// Sleep between polls. Short enough to catch a message box as it types
     /// itself out, long enough to leave the game its memory bandwidth.
     constexpr u64 kPollIntervalNs = 16ull * 1000ull * 1000ull;   // ~16 ms
+
+    /// Scans between sweeps for gfl::str::StrBuf objects. Discovery only --
+    /// see the comment at the scan itself.
+    constexpr u32 kStrBufScanEvery = 4;
 
     /// Ceiling on panes tracked at once. A text-heavy Gen 6 screen carries
     /// about 155. Polling thousands of addresses every 16 ms would be felt,
@@ -107,7 +112,10 @@ namespace {
     void ProbeSiblingPanes(void);
     void SurveyAddressSpace(void);
     void FindTextPanesByShape(u32, u32);
-    void SurveyOnceIfDue(void);
+    /// Set by RequestLayoutDump so a survey can be aimed at a chosen screen.
+    volatile bool s_surveyRequested = false;
+
+    void SurveyOnceIfDue(bool narrowed);
     void DumpPaneLayout(const std::vector<narration::Observation> &, bool);
 
     std::string Hex32(u32 value)
@@ -134,7 +142,7 @@ namespace {
     /// hide a bug for a whole session -- but this one answers a question the
     /// mod cannot work without, and needing a keypress to get the answer is
     /// its own kind of failure.
-    void SurveyOnceIfDue(void)
+    void SurveyOnceIfDue(bool narrowed)
     {
         if (!diag::IsNarrationTraceRequested())
             return;
@@ -142,8 +150,25 @@ namespace {
         static u32 fullScans = 0;
         static bool done = false;
 
+        // A survey can also be asked for again. The automatic one fires early,
+        // on whatever screen the game happens to be showing -- which is the
+        // boot sequence, drawn from code.bin. The classes that matter are in
+        // the CRO modules loaded later (DllDialogCommon and friends), and they
+        // only exist once the player is actually in one of those screens. So
+        // the layout-dump chord re-arms this, letting the player point it at
+        // the screen whose text is missing.
+        const bool requested = s_surveyRequested;
+        if (requested)
+        {
+            s_surveyRequested = false;
+            done = false;
+            fullScans = 3;
+        }
+
         if (done)
             return;
+        if (!requested && narrowed)
+            return;                 // automatic surveys want a full-heap pass
         if (++fullScans < 3)        // let the game settle into a real screen
             return;
 
@@ -158,6 +183,7 @@ namespace {
         const u64 startTick = svcGetSystemTick();
 
         const u32 vtable = game::Addr(game::addr::kVtTextBox);
+        const u32 vtStrBuf = game::Addr(game::addr::kVtStrBuf);
         if (vtable == 0)
         {
             // No verified address for this series. Stay quiet.
@@ -175,9 +201,96 @@ namespace {
         const bool narrowed = g_cache.NarrowScanRange(start, end);
 
         std::vector<u32> hits(kMaxPanes, 0);
-        const u32 found = vtscan::FindObjectsBlockwise(
+        u32 found = vtscan::FindObjectsBlockwise(
             ReadBlock, nullptr, start, end, vtable,
             &hits[0], kMaxPanes, g_scanBuffer, vtscan::kPageSize / 4);
+
+        // Dialogue is not a layout pane. Gen 6 draws its message box from a CRO
+        // module and keeps the text in a gfl::str::StrBuf, so a TextBox-only
+        // scan finds menus and prompts but never a conversation -- which is
+        // exactly the symptom this chased for a long time. Scanning both kinds
+        // into the same list is what makes dialogue narratable at all.
+        // Scanning for string objects is expensive -- they are spread across
+        // the heap, so unlike panes there is no tight region to narrow to, and
+        // doing it every pass took a scan from 141 ms to 849 ms.
+        //
+        // It only ever *discovers* objects though. Once an address is cached it
+        // is polled every 16 ms, and dialogue replaces the text inside the same
+        // StrBuf rather than allocating a new one -- so a conversation is still
+        // followed at full speed. Rediscovery can afford to be occasional.
+        static u32 sbCountdown = 0;
+        static std::vector<u32> sbLast;
+        const bool scanStrings = (sbCountdown == 0);
+        sbCountdown = scanStrings ? kStrBufScanEvery : (sbCountdown - 1);
+
+        // On a skipped pass, carry forward what the last string scan found.
+        // The cache is rebuilt from this list every time, so without this the
+        // strings would fall out of it for three passes in four and dialogue
+        // would stutter in and out of being narrated.
+        if (!scanStrings)
+        {
+            for (u32 i = 0; i < sbLast.size() && found < kMaxPanes; ++i)
+            {
+                u32 vt = 0;
+                if (game::Read32(sbLast[i], vt) && vt == vtStrBuf)
+                    hits[found++] = sbLast[i];
+            }
+        }
+
+        if (vtStrBuf != 0 && scanStrings && found < kMaxPanes)
+        {
+            // String objects sit in a different part of the heap from layout
+            // panes, so reusing the pane region means scanning everything
+            // between the two -- which took a narrow scan from 141 ms to 849 ms
+            // and was felt directly as a delay before dialogue was spoken.
+            // Remember where they actually were and look there instead.
+            static u32 sbLow  = 0;
+            static u32 sbHigh = 0;
+
+            u32 sbStart = start;
+            u32 sbEnd   = end;
+            if (sbLow != 0 && sbHigh > sbLow)
+            {
+                sbStart = sbLow;
+                sbEnd   = sbHigh;
+            }
+
+            u32 more = vtscan::FindObjectsBlockwise(
+                ReadBlock, nullptr, sbStart, sbEnd, vtStrBuf,
+                &hits[found], kMaxPanes - found, g_scanBuffer,
+                vtscan::kPageSize / 4);
+
+            // Nothing where they were last time means the screen changed under
+            // us; fall back to the full region once to re-find them.
+            if (more == 0 && sbLow != 0)
+            {
+                sbLow = sbHigh = 0;
+                more = vtscan::FindObjectsBlockwise(
+                    ReadBlock, nullptr, start, end, vtStrBuf,
+                    &hits[found], kMaxPanes - found, g_scanBuffer,
+                    vtscan::kPageSize / 4);
+            }
+
+            if (more > 0)
+            {
+                sbLast.assign(&hits[found], &hits[found] + more);
+
+                u32 lo = hits[found];
+                u32 hi = hits[found];
+                for (u32 i = 1; i < more; ++i)
+                {
+                    const u32 a = hits[found + i];
+                    if (a < lo) lo = a;
+                    if (a > hi) hi = a;
+                }
+                // A page of slack either side, so an object allocated just
+                // beside the others is still caught next time.
+                sbLow  = (lo > 0x2000) ? (lo - 0x2000) : 0;
+                sbHigh = hi + 0x2000;
+            }
+
+            found += more;
+        }
 
         // FindObjects reports the true total even when it wrote fewer, which
         // is the point: "155" and "half a million" say very different things
@@ -192,8 +305,11 @@ namespace {
             return;
         }
 
-        if (!narrowed)
-            SurveyOnceIfDue();
+        // Explicit requests are served on any scan. The automatic one still
+        // waits for a full-heap pass, but once the cache narrows its region
+        // most scans are narrow -- so gating on that meant a survey the player
+        // asked for could sit unserved indefinitely.
+        SurveyOnceIfDue(narrowed);
 
         hits.resize(found < kMaxPanes ? found : kMaxPanes);
         diag::NarrationTrace("scan: " + std::to_string(found) + " panes found" +
@@ -219,8 +335,22 @@ namespace {
         u32 read = 0;
         for (u32 i = 0; i < panes.size(); ++i)
         {
+            // A tracked address is either a layout pane or a GameFreak string
+            // object, and the vtable at +0 says which. Dispatching on it means
+            // the two kinds can share one cache and one narrator, instead of
+            // duplicating the whole polling path.
             std::string text;
-            if (!textbox::ReadString(ReadWord, ReadHalf, nullptr, panes[i], text))
+            u32 vt = 0;
+            if (!ReadWord(panes[i], vt, nullptr))
+                continue;       // freed since the scan
+
+            bool got = false;
+            if (vt == game::Addr(game::addr::kVtStrBuf))
+                got = strbuf::ReadString(ReadWord, ReadHalf, nullptr, panes[i], text);
+            else
+                got = textbox::ReadString(ReadWord, ReadHalf, nullptr, panes[i], text);
+
+            if (!got)
                 continue;       // freed, or laid out but empty -- both normal
             ++read;
             observed.push_back(narration::Observation(panes[i], text));
@@ -320,9 +450,19 @@ namespace {
     void SurveyAddressSpace(void)
     {
         struct Probe { const char *name; const game::AddrPair *vt; };
+        // The dialogue family is included deliberately. A TextBox-only survey
+        // says nothing about the message box, because the message box is not a
+        // TextBox -- addresses.cpp has had app::tool::TalkWindow ("the dialogue
+        // box itself") identified from RTTI for some time, but nothing has ever
+        // scanned for it. Counting instances per screen is the cheapest way to
+        // find out which of these actually exists while dialogue is showing.
         const Probe probes[] = {
-            { "TextBox", &game::addr::kVtTextBox },
-            { "Picture", &game::addr::kVtPicture },
+            { "TextBox",     &game::addr::kVtTextBox     },
+            { "Picture",     &game::addr::kVtPicture     },
+            { "TalkWindow",  &game::addr::kVtTalkWindow  },
+            { "MsgWin",      &game::addr::kVtMsgWin      },
+            { "StrWin",      &game::addr::kVtStrWin      },
+            { "MenuWindow",  &game::addr::kVtMenuWindow  },
         };
 
         // Well past anything the mod currently looks at. The permission check
@@ -505,6 +645,17 @@ namespace {
             { "Window",   &game::addr::kVtWindow   },
             { "Pane",     &game::addr::kVtPane     },
             { "Layout",   &game::addr::kVtLayout   },
+            // The dialogue and menu owners. Geometry tells us nothing useful
+            // about these -- their layout is unknown -- so they get a raw word
+            // dump instead, which is how the text pointer will be found.
+            { "MsgWin",     &game::addr::kVtMsgWin     },
+            { "MenuWindow", &game::addr::kVtMenuWindow },
+            // gfl::str::StrBuf. Its layout is now known from the constructor at
+            // 0x0038E4A8: buffer pointer at +4, capacity and length packed into
+            // the word at +8, UTF-16. Previously dismissed as a pool of empty
+            // formatting buffers -- which most of them are -- but the dialogue
+            // text has to live in one of them.
+            { "StrBuf",     &game::addr::kVtStrBuf     },
         };
 
         for (u32 p = 0; p < sizeof(probes) / sizeof(probes[0]); ++p)
@@ -537,6 +688,78 @@ namespace {
                                      " ty=" + Hex32(ty) +
                                      " w=" + Hex32(w) +
                                      " h=" + Hex32(h));
+
+                // For the classes whose layout we do not know yet, print the
+                // object itself. A pointer into the heap followed by readable
+                // UTF-16 is what the message text will look like.
+                // StrBuf has a known layout, so read it rather than dumping it.
+                if (probes[p].vt == &game::addr::kVtStrBuf)
+                {
+                    std::string text;
+                    if (strbuf::ReadString(ReadWord, ReadHalf, nullptr, hits[i], text))
+                    {
+                        diag::NarrationTrace("    " + Hex32(hits[i]) +
+                                             "  STRBUF \"" + text + "\"");
+                    }
+                    continue;
+                }
+
+                const bool unknownLayout =
+                    (probes[p].vt == &game::addr::kVtMsgWin ||
+                     probes[p].vt == &game::addr::kVtMenuWindow);
+
+                if (unknownLayout)
+                {
+                    for (u32 base = 0; base < 0x80; base += 32)
+                    {
+                        std::string row = "    +" + Hex32(base).substr(6) + ":";
+                        for (u32 w2 = 0; w2 < 8; ++w2)
+                        {
+                            u32 value = 0;
+                            row += " " + (game::Read32(hits[i] + base + w2 * 4, value)
+                                              ? Hex32(value) : std::string("--------"));
+                        }
+                        diag::NarrationTrace(row);
+                    }
+
+                    // Follow every field that looks like a heap pointer and try
+                    // to read a string there. The message text is reached by a
+                    // chain of these, and one hop is usually enough to see it:
+                    // readable UTF-16 is unmistakable next to raw fields.
+                    for (u32 f = 4; f < 0x30; f += 4)
+                    {
+                        u32 ptr = 0;
+                        if (!game::Read32(hits[i] + f, ptr))
+                            continue;
+                        if (ptr < game::kHeapMin || ptr >= game::kHeapMax)
+                            continue;
+
+                        // ReadString expects a TextBox and adds kStringOffset
+                        // itself, so bias the address to make the pointer we
+                        // are testing land where it expects the string.
+                        std::string text;
+                        const bool got = textbox::ReadString(
+                            ReadWord, ReadHalf, nullptr,
+                            ptr - textbox::kStringOffset, text);
+                        if (got && !text.empty() && textbox::WorthSpeaking(text))
+                        {
+                            diag::NarrationTrace("    +" + Hex32(f).substr(6) +
+                                                 " -> " + Hex32(ptr) +
+                                                 "  TEXT \"" + text + "\"");
+                            continue;
+                        }
+
+                        std::string row = "    +" + Hex32(f).substr(6) + " -> " +
+                                          Hex32(ptr) + ":";
+                        for (u32 w2 = 0; w2 < 6; ++w2)
+                        {
+                            u32 value = 0;
+                            row += " " + (game::Read32(ptr + w2 * 4, value)
+                                              ? Hex32(value) : std::string("--------"));
+                        }
+                        diag::NarrationTrace(row);
+                    }
+                }
             }
         }
     }
@@ -741,6 +964,12 @@ void RequestLayoutDump(void)
 {
     Lock lock(g_lock);
     g_wantLayoutDump = true;
+
+    // Also re-arm the address-space survey. The dump answers "what is the
+    // narrator tracking on this screen"; the survey answers the harder
+    // question behind it -- "what text-like classes exist here that it is NOT
+    // tracking", which is how a CRO module's TextBox gets found at all.
+    s_surveyRequested = true;
 }
 
 u32 TrackedPanes(void)
