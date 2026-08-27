@@ -111,24 +111,15 @@ namespace xyoras { namespace narration {
 
             trackers_.swap(next);
 
-            // A burst of lines settling together is a menu or panel opening,
-            // not the player causing something. Reading every option aloud is
-            // the flood this design exists to avoid, and it is what made the
-            // repeat-last key replay an entire menu.
+            // A burst of lines settling together used to be collapsed to a bare
+            // count, as a stopgap for menus reading themselves out wholesale.
+            // That is now handled properly by reading the menu cursor (see
+            // menuwindow.hpp), and the collapse did real damage in the
+            // meantime: three lines of genuine text became "3 items".
             //
-            // Audio-game menus solve this by speaking an intro that carries the
-            // count, then only the focused item (see nvgt's menu.nvgt), and
-            // NVDA does the same thing by speaking the focused object rather
-            // than the screen. Announcing the count is the half that can be
-            // done without knowing which item is focused; the other half needs
-            // the selection highlight, which is a Picture rather than a
-            // TextBox and is not yet identified.
-            if (toSpeak.size() > kBurstIsAMenu)
-            {
-                const std::size_t count = toSpeak.size();
-                toSpeak.clear();
-                toSpeak.push_back(CountPhrase(count));
-            }
+            // Multiple lines arriving at once is normal -- a prompt with its
+            // answer, a battle message with its follow-up -- and every one of
+            // them is worth hearing.
 
             // The baseline has to cover the WHOLE arriving screen, not just
             // the first poll in which something settles.
@@ -185,11 +176,6 @@ namespace xyoras { namespace narration {
         /// which never goes quiet still becomes audible.
         static const u32 kBaselineMaxPolls = 40;
 
-        /// More lines than this settling in one poll means a screen arrived,
-        /// not that something happened. Two is deliberate: a prompt plus its
-        /// answer is normal, a five-option menu is not.
-        static const std::size_t kBurstIsAMenu = 2;
-
         void NewContext()
         {
             trackers_.clear();
@@ -219,18 +205,6 @@ namespace xyoras { namespace narration {
             return digits;
         }
 
-        static std::string CountPhrase(std::size_t n)
-        {
-            std::string digits;
-            if (n == 0)
-                digits = "0";
-            while (n > 0)
-            {
-                digits.insert(digits.begin(), static_cast<char>('0' + (n % 10)));
-                n /= 10;
-            }
-            return digits + " items";
-        }
 
         std::map<u32, screentext::Tracker> trackers_;
         bool baselinePending_;

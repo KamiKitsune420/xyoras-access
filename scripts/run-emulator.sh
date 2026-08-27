@@ -186,7 +186,11 @@ if [ "${MODE}" = "manual" ]; then
     exit 0
 fi
 
-log "running for ${MODE}s (auto-pressing ${XYORAS_AUTO_PRESS})"
+if [ -n "${LUA_SCRIPT}" ]; then
+    log "running for ${MODE}s (driven by $(basename "${LUA_SCRIPT}"))"
+else
+    log "running for ${MODE}s (auto-pressing ${XYORAS_AUTO_PRESS})"
+fi
 "${AZAHAR}" "${ROM}" &
 APP_PID=$!
 

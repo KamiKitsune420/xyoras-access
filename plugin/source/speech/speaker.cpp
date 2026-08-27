@@ -141,9 +141,35 @@ namespace {
             const u64 expectedMs = (static_cast<u64>(stats.samples) * 1000ull) / rate;
             const u64 deadline = osGetTime() + expectedMs + 500ull;
 
-            while (g_running && g_audio != NULL && g_audio->Busy() && g_queue.Empty())
+            // Wait for BOTH the backend to report idle AND the utterance's own
+            // duration to have elapsed.
+            //
+            // Neither signal is sufficient alone. Busy() is authoritative on
+            // hardware but useless under emulation, where CSND is observed
+            // rather than played and cwavIsPlaying reports idle immediately --
+            // so trusting it alone fires the whole queue off in milliseconds,
+            // and since a new sound on a channel replaces the old one, every
+            // line wipes the one before it and nothing is heard at all. The
+            // duration alone would be wrong the other way, holding the worker
+            // past the end of a line that finished early.
+            // Note what this does NOT check: whether the queue is empty.
+            //
+            // It used to, on the reasoning that a waiting item should be able
+            // to cut in. But during narration the queue is almost never empty,
+            // so the wait ended instantly every time and utterances were fired
+            // back to back regardless -- and because a new sound on a CSND
+            // channel replaces the old one, each line wiped the previous one a
+            // fraction of a second in. The measured symptom was eighteen
+            // utterances submitted in one minute and nothing audible.
+            //
+            // Interruption is the queue's job, not this loop's: Ui items
+            // replace pending Ui items at enqueue time, and StopAll cancels
+            // outright. This just lets a line finish being heard.
+            while (g_running)
             {
-                if (osGetTime() >= deadline)
+                const bool stillAudible = (g_audio != NULL && g_audio->Busy());
+                const bool timeLeft = (osGetTime() < deadline);
+                if (!stillAudible && !timeLeft)
                     break;
                 svcSleepThread(10ull * 1000ull * 1000ull);   // 10 ms
             }

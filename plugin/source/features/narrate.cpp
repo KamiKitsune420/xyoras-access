@@ -56,6 +56,11 @@ namespace {
     /// see the comment at the scan itself.
     constexpr u32 kStrBufScanEvery = 4;
 
+    /// Polls between hunts for a menu when none is currently known. The scan is
+    /// a full heap sweep, so doing it every poll would cost more than every
+    /// other part of narration combined.
+    constexpr u32 kMenuRescanEvery = 30;
+
     /// Ceiling on panes tracked at once. A text-heavy Gen 6 screen carries
     /// about 155. Polling thousands of addresses every 16 ms would be felt,
     /// so the cache is capped well above a real screen and far below a
@@ -347,10 +352,49 @@ namespace {
         static u32 lastCount    = 0;
         static u32 lastObject   = 0;
 
+        // Finding the menu means a full heap scan, which costs hundreds of
+        // milliseconds -- far too much to repeat on a 16 ms poll. So remember
+        // where it was: the object stays put for as long as the menu is open,
+        // and re-reading a known address is a handful of words. Only rescan
+        // when the cached address stops looking like a menu, which is exactly
+        // when a menu has closed or a different one has opened.
+        static u32 cached = 0;
+        static u32 rescanCountdown = 0;
+
         std::vector<u32> hits(4, 0);
-        const u32 found = vtscan::FindObjectsBlockwise(
-            ReadBlock, nullptr, game::kHeapMin, game::kHeapMax, vt,
-            &hits[0], 4, g_scanBuffer, vtscan::kPageSize / 4);
+        u32 found = 0;
+
+        if (cached != 0)
+        {
+            u32 vtHere = 0;
+            if (game::Read32(cached, vtHere) && vtHere == vt)
+            {
+                hits[0] = cached;
+                found = 1;
+            }
+            else
+            {
+                cached = 0;
+            }
+        }
+
+        if (found == 0)
+        {
+            // Rescanning every poll when there is no menu would be just as
+            // expensive as never caching at all.
+            if (rescanCountdown > 0)
+            {
+                --rescanCountdown;
+                return;
+            }
+            rescanCountdown = kMenuRescanEvery;
+
+            found = vtscan::FindObjectsBlockwise(
+                ReadBlock, nullptr, game::kHeapMin, game::kHeapMax, vt,
+                &hits[0], 4, g_scanBuffer, vtscan::kPageSize / 4);
+            if (found > 0)
+                cached = hits[0];
+        }
 
         if (found == 0)
         {
